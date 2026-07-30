@@ -202,16 +202,36 @@ Path     Stage 1 trampoline
 Erase RAM  YES - wipe the dashboard first
 ```
 
-**Triangle toggles the RAM erase and re-plans.** That also switches `Path`
-between the trampoline and the direct copy, so all the combinations can be
-tried on a real console without another build:
+Two toggles, so a launch can be bisected on real hardware without rebuilding:
+
+| Button | Toggles | Effect |
+|---|---|---|
+| Triangle | Erase RAM | Wipes the dashboard out of RAM first. Also switches `Path` between the trampoline and the direct copy |
+| Square | BIOS | Rebuilds the retail kernel state first, via `bios_reinit.c` |
 
 | Erase RAM | Path | What it exercises |
 |---|---|---|
 | no | direct | The handoff Fast Boot and UniROM have always used |
 | yes | stage 1 | Trampoline, RAM wipe, memfill |
 
-Defaults: SIO loader **no** (proven working), UniROM **yes**.
+Defaults: SIO loader **no / no** (proven working, do not disturb),
+UniROM **yes / yes**.
+
+### The BIOS toggle
+
+`reinitializeBIOSForHandoff()` has been sitting in `bios_reinit.c` unused. It
+is the same warm-boot kernel reconstruction `cdloader.exe` performs, and it
+runs *before* `quiesceForHandoff()` because it makes BIOS calls.
+
+The SIO loader does not need it - it makes exactly one BIOS call in its whole
+life, `FlushCache`, and already works without it. UniROM is the opposite: it
+installs its own kernel exception handler and TTY redirect and leans on BIOS
+services throughout, so it is the target most likely to care that this
+dashboard has been driving the memory card, the CD and the TTY beforehand.
+
+`handoff.h` notes that an earlier attempt to do this *unconditionally* broke
+Fast Boot and serial loading, which is why it is per-entry and toggleable
+rather than always on.
 
 If a launch black-screens, note the four addresses and which `Path` was shown
 before pressing X — that narrows it to one of two code paths instead of the
