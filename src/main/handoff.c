@@ -16,7 +16,7 @@
 // wedged can never hang the hand-off itself.
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
-void quiesceForHandoff(void) {
+static void quiesceCommon(void) {
 	// 1. Silence the SPU. UniROM never touches the SPU at all (there is not
 	//    a single access to the 0x1f801c00 block anywhere in its binary), so
 	//    without this our background music would carry on playing underneath
@@ -46,10 +46,9 @@ void quiesceForHandoff(void) {
 	//    UniROM's wait loop at 0x801DB40C can complete.
 	GPU_GP1 = gp1_resetGPU();
 
-	// 4. Mask every interrupt source and acknowledge anything already
-	//    pending (I_STAT bits are cleared by writing a 0 to them).
-	IRQ_MASK = 0;
-	IRQ_STAT = 0;
+	// 4. (Interrupt masking is not done here - it differs between the two
+	//    hand-off styles, see quiesceForHandoff() and quiesceForBIOSExec()
+	//    below.)
 
 	// 5. Clear any COP0 hardware breakpoint still armed. This is the actual
 	//    cause of "UniROM launches and the console just restarts": Settings
@@ -72,9 +71,38 @@ void quiesceForHandoff(void) {
 	cop0_setReg(COP0_BDA,  0);
 	cop0_setReg(COP0_BDAM, 0);
 
-	// 6. Interrupts off at the CPU. Note we deliberately leave DMA_DPCR
-	//    alone - see handoff.h.
+	// Note we deliberately leave DMA_DPCR alone - see handoff.h.
+}
+
+void quiesceForHandoff(void) {
+	quiesceCommon();
+
+	// Mask every interrupt source and acknowledge anything already pending
+	// (I_STAT bits are cleared by writing a 0 to them), then turn interrupts
+	// off at the CPU.
+	//
+	// Correct for a bare-metal target, which installs its own handlers
+	// before enabling anything. Wrong for a target handed over through
+	// Exec(): that one expects the interrupt state the BIOS would have given
+	// it, and if it waits on a kernel event the event can never arrive.
+	IRQ_MASK = 0;
+	IRQ_STAT = 0;
 	__asm__ volatile("mtc0 $zero, $12\n");
+}
+
+void quiesceForBIOSExec(void) {
+	quiesceCommon();
+
+	/*
+	 * Deliberately nothing further: the interrupt mask, I_STAT and COP0 SR
+	 * are left exactly as they are, so Exec() and the program it starts see
+	 * the machine in the state the BIOS would have handed them.
+	 *
+	 * A still-pending interrupt therefore fires into the dashboard's own
+	 * handler, which is harmless - this path never erases the dashboard, so
+	 * that handler is still resident and still valid right up until the
+	 * launched program installs its own.
+	 */
 }
 
 void quiesceForFirmwareReset(void) {

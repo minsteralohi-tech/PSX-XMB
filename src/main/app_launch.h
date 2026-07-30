@@ -104,6 +104,7 @@ extern "C" {
 #define APP_MAX_FILLS 6
 
 typedef struct {
+	int      useBiosExec;      /* hand over through BIOS Exec() instead    */
 	int      useStage1;        /* 0 = direct copy-and-jump from C          */
 	uint32_t entry, gp, sp;
 	uint32_t dest, destEnd, bodySize;
@@ -141,6 +142,23 @@ typedef enum {
  */
 AppPlanResult planEmbeddedApp(const uint8_t *exe, int eraseRam,
                               AppLaunchPlan *plan);
+
+/*
+ * Ask for the BIOS Exec() hand-off instead of the direct jump.
+ *
+ * Exec() is how the BIOS itself starts a PS-EXE: given the header from offset
+ * 0x10 onwards it sets $gp, builds the stack and frame pointer, zero-fills the
+ * BSS and calls the entry point, with the kernel live and interrupts left as
+ * the BIOS would have left them. Targets that lean on BIOS services from their
+ * first instruction - UniROM installs its own kernel exception handler and TTY
+ * redirect - can start correctly this way and not from a hand-rolled jump.
+ *
+ * It cannot be combined with erasing RAM or with the stage 1 trampoline: Exec()
+ * runs kernel code and returns into the caller's world on failure, so the
+ * dashboard has to still be there. Returns 0 and leaves the plan unchanged if
+ * the two are incompatible.
+ */
+int planUseBiosExec(AppLaunchPlan *plan, int enable);
 
 /* Human-readable form of an AppPlanResult, for the UI. */
 const char *appPlanResultText(AppPlanResult result);

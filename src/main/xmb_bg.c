@@ -1696,12 +1696,21 @@ extern const uint8_t sunTextureData[], sunPaletteData[];
 static TextureInfo sunTex;
 
 // Lava/Earth/Moon planet textures for Nebula 3's textured roaming planets.
-// Same 256x128 8bpp footprint as the sun texture above (128 VRAM columns at
-// 8bpp, since each 16-bit VRAM word holds two 8bpp texels) - stacked at the
-// same proven-safe X column, one 128-row band each, filling the rest of
-// that column down to VRAM's actual 512-row limit (0-128 sun, 128-256,
-// 256-384, 384-512). CLUTs stack immediately below the sun's CLUT row, same
-// "spare space below the framebuffers" spot.
+// 256x128 at 4bpp: 64 VRAM columns each (four 4bpp texels per 16-bit VRAM
+// word), stacked at the same proven-safe X column as the sun, one 128-row
+// band each, filling the rest of that column down to VRAM's actual 512-row
+// limit (0-128 sun, 128-256, 256-384, 384-512). CLUTs stack immediately
+// below the sun's CLUT row, same "spare space below the framebuffers" spot -
+// 16 entries each now rather than 256, so they no longer span the row.
+//
+// These three were 8bpp until main RAM ran short. At 256x128 an 8bpp texture
+// costs 32 KB + a 512-byte CLUT in the executable; at 4bpp it is 16 KB + 32
+// bytes. Three of them saves ~50 KB of RAM. The source PNGs were requantized
+// to 16 colours with Floyd-Steinberg dithering, because tools/convertImage.py
+// rejects anything above the colour limit rather than quantizing it.
+//
+// The sun stays at 8bpp deliberately: it is the hero object, drawn far larger
+// than the roaming planets, and banding shows on it.
 #define LAVA_TEX_VRAM_X  832
 #define LAVA_TEX_VRAM_Y  128
 #define LAVA_TEX_CLUT_X    0
@@ -1732,17 +1741,17 @@ void initNebulaTexture(RenderContext *ctx) {
 	uploadIndexedTexture(
 		&lavaTex, lavaTextureData, lavaPaletteData,
 		LAVA_TEX_VRAM_X, LAVA_TEX_VRAM_Y, LAVA_TEX_CLUT_X, LAVA_TEX_CLUT_Y,
-		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_8BPP
+		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_4BPP
 	);
 	uploadIndexedTexture(
 		&earthTex, earthTextureData, earthPaletteData,
 		EARTH_TEX_VRAM_X, EARTH_TEX_VRAM_Y, EARTH_TEX_CLUT_X, EARTH_TEX_CLUT_Y,
-		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_8BPP
+		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_4BPP
 	);
 	uploadIndexedTexture(
 		&moonTex, moonTextureData, moonPaletteData,
 		MOON_TEX_VRAM_X, MOON_TEX_VRAM_Y, MOON_TEX_CLUT_X, MOON_TEX_CLUT_Y,
-		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_8BPP
+		SUN_TEX_W, SUN_TEX_H, GP0_COLOR_4BPP
 	);
 }
 

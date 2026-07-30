@@ -45,3 +45,18 @@ defBiosB0 biosClose,        0x36
 .endm
 
 defBiosA0 biosFlushCache,   0x44
+
+# Exec (A0 0x43) is how the BIOS itself starts a PS-EXE. Given a pointer to the
+# ten-word EXEC structure - which is exactly the PS-EXE header from offset 0x10
+# onwards - it sets $gp, sets up the stack and frame pointer from s_addr/s_size,
+# zero-fills b_addr/b_size and calls pc0, all with the kernel live.
+#
+# This exists for targets that are unhappy with a hand-rolled jump. UniROM is
+# the case in point: it installs its own kernel exception handler and TTY
+# redirect and leans on BIOS services from its first instruction, and it starts
+# correctly when the BIOS boots it but not when we set the registers ourselves.
+# Bare-metal programs such as the 240p suite and the standalone SIO loader do
+# not care either way and keep using the direct jump.
+#
+# Returns to the caller (with 0 in $v0) only if the launch failed.
+defBiosA0 biosExec,         0x43

@@ -83,6 +83,24 @@ void quiesceForFirmwareReset(void);
 __attribute__((noreturn)) void launchPSEXEImage(const uint8_t *exe);
 
 /*
+ * Quiesce variant for handing over through the BIOS's own Exec() call.
+ *
+ * Identical to quiesceForHandoff() except that it leaves the interrupt mask
+ * and the COP0 status register alone, because Exec() runs kernel code and the
+ * program it starts expects the interrupt state the BIOS would have handed it.
+ * quiesceForHandoff() ends by writing 0 to COP0 SR, which disables interrupts
+ * entirely - fine for a bare-metal target that sets up its own, fatal for one
+ * that waits on a BIOS event which can then never fire.
+ */
+void quiesceForBIOSExec(void);
+
+/*
+ * BIOS A0(43h) Exec(), from bios_calls.s. The EXEC structure it takes is the
+ * PS-EXE header from offset 0x10 onwards. Returns only if the launch failed.
+ */
+int biosExec(const void *execStructure, int argc, void *argv);
+
+/*
  * Flush the instruction cache, then set $gp/$sp and jump to a program that
  * has already been copied into place. Never returns.
  *

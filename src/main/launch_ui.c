@@ -41,8 +41,16 @@ extern const uint8_t uniromExe[];
  */
 #define SIO_LOADER_ERASE_RAM 0
 
-/* UniROM manages RAM and the kernel itself - see runUniROMLauncher(). */
-#define UNIROM_ERASE_RAM 1
+/*
+ * UniROM starts correctly when the BIOS boots it and not when we set the
+ * registers ourselves, so it defaults to the BIOS Exec() hand-off. That is
+ * incompatible with erasing RAM (Exec() runs kernel code and needs the
+ * dashboard's handlers still resident), so the erase defaults off for it too.
+ * Square flips Exec on and off on the confirmation screen.
+ */
+#define UNIROM_ERASE_RAM  0
+#define UNIROM_BIOS_EXEC  1
+#define SIO_LOADER_BIOS_EXEC 0
 
 
 static void waitForRelease(void) {
@@ -100,6 +108,7 @@ static int confirmHandoff(
 	const char     *blurb2,
 	const uint8_t  *exe,
 	int            *eraseRam,
+	int            *biosExecMode,
 	AppLaunchPlan  *plan
 ) {
 	char line[64];
@@ -123,8 +132,22 @@ static int confirmHandoff(
 
 			if (planEmbeddedApp(exe, !*eraseRam, &retry) == APP_PLAN_OK) {
 				*eraseRam = !*eraseRam;
+
+				/* Exec() cannot survive a RAM erase or the stage 1
+				 * trampoline; drop it if the new plan needs either. */
+				if (!planUseBiosExec(&retry, *biosExecMode))
+					*biosExecMode = 0;
+
 				*plan = retry;
 			}
+
+			waitForRelease();
+			continue;
+		}
+
+		if (buttons & PAD_BTN_SQUARE) {
+			if (planUseBiosExec(plan, !*biosExecMode))
+				*biosExecMode = !*biosExecMode;
 
 			waitForRelease();
 			continue;
@@ -163,7 +186,9 @@ static int confirmHandoff(
 		/* Which handoff this will use. "Direct" is the same copy-and-jump
 		 * that has always been used here; "Stage 1" is the trampoline. */
 		snprintf(line, sizeof(line), "Path     %s",
-			plan->useStage1 ? "Stage 1 trampoline" : "Direct copy + jump");
+			plan->useStage1   ? "Stage 1 trampoline" :
+			plan->useBiosExec ? "BIOS Exec() (as the BIOS boots it)"
+			                  : "Direct copy + jump");
 		printString(ctx, 24, 176, 0x60ff60, line);
 
 		snprintf(line, sizeof(line), "Erase RAM  %s",
@@ -195,7 +220,8 @@ static void runLaunchScreen(
 	const char    *blurb1,
 	const char    *blurb2,
 	const uint8_t *exe,
-	int            eraseRam
+	int            eraseRam,
+	int            biosExecMode
 ) {
 	AppLaunchPlan plan;
 	AppPlanResult result = planEmbeddedApp(exe, eraseRam, &plan);
@@ -214,7 +240,11 @@ static void runLaunchScreen(
 		return;
 	}
 
-	if (!confirmHandoff(ctx, title, blurb1, blurb2, exe, &eraseRam, &plan))
+	if (!planUseBiosExec(&plan, biosExecMode))
+		biosExecMode = 0;
+
+	if (!confirmHandoff(ctx, title, blurb1, blurb2, exe, &eraseRam,
+	                    &biosExecMode, &plan))
 		return;
 
 	/* Never returns. */
@@ -235,7 +265,8 @@ void runSIOLoader(
 		"The standalone serial loader will start and",
 		"wait for a PS-EXE on SIO1 at 115200 8N2.",
 		sioLoaderExe,
-		SIO_LOADER_ERASE_RAM
+		SIO_LOADER_ERASE_RAM,
+		SIO_LOADER_BIOS_EXEC
 	);
 }
 
@@ -265,6 +296,7 @@ void runUniROMLauncher(
 		"UniROM will be copied to RAM and started.",
 		"For a real UniROM cart, use the cart entry.",
 		uniromExe,
-		UNIROM_ERASE_RAM
+		UNIROM_ERASE_RAM,
+		UNIROM_BIOS_EXEC
 	);
 }

@@ -283,6 +283,21 @@ AppPlanResult planEmbeddedApp(const uint8_t *exe, int eraseRam,
 	return APP_PLAN_OK;
 }
 
+int planUseBiosExec(AppLaunchPlan *plan, int enable) {
+	if (!enable) {
+		plan->useBiosExec = 0;
+		return 1;
+	}
+
+	/* Exec() needs the kernel and the dashboard intact, so it is only
+	 * available on the direct path with no RAM erase. */
+	if (plan->useStage1)
+		return 0;
+
+	plan->useBiosExec = 1;
+	return 1;
+}
+
 const char *appPlanResultText(AppPlanResult result) {
 	switch (result) {
 	case APP_PLAN_OK:              return "ok";
@@ -347,6 +362,55 @@ __attribute__((noreturn)) static void runDirectLaunch(const AppLaunchPlan *plan)
 	}
 
 	jumpToLoadedEXE(entry, gp, sp);
+}
+
+/*
+ * Hand over through the BIOS's own Exec() call.
+ *
+ * The payload is copied exactly as in runDirectLaunch(), but instead of
+ * setting the registers ourselves we build the ten-word EXEC structure the
+ * BIOS expects - which is simply the PS-EXE header from offset 0x10 - and let
+ * the kernel do the rest. Exec() performs its own BSS fill and cache flush, so
+ * neither is done here.
+ *
+ * The structure is copied onto the stack rather than pointed at the embedded
+ * blob, so it survives even if the payload copy happened to run over the
+ * original header.
+ */
+__attribute__((noreturn)) static void runExecLaunch(const AppLaunchPlan *plan) {
+	const uint32_t *header = (const uint32_t *) (plan->src - PSEXE_PAYLOAD_OFFSET);
+	const uint32_t *src    = (const uint32_t *) plan->src;
+	const uint32_t  dest   = plan->dest;
+	const uint32_t  words  = (plan->bodySize + 3u) / 4u;
+
+	uint32_t exec[10];
+
+	for (int i = 0; i < 10; i++)
+		exec[i] = header[(0x10 / 4) + i];
+
+	quiesceForBIOSExec();
+
+	volatile uint32_t *d = (volatile uint32_t *) dest;
+
+	if ((const uint32_t *) dest > src) {
+		for (uint32_t i = words; i-- > 0; )
+			d[i] = src[i];
+	} else {
+		for (uint32_t i = 0; i < words; i++)
+			d[i] = src[i];
+	}
+
+	flushCache();
+	biosExec(exec, 1, 0);
+
+	/*
+	 * Exec() only returns if it refused to start the program. There is
+	 * nothing sensible left to do - the payload has already been written
+	 * over whatever was at its load address - so stop rather than return
+	 * into a dashboard that may no longer be intact.
+	 */
+	for (;;)
+		;
 }
 
 __attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan) {
@@ -446,6 +510,9 @@ AppPlanResult launchEmbeddedApp(const uint8_t *exe, int eraseRam) {
 __attribute__((noreturn)) void runAppLaunch(const AppLaunchPlan *plan) {
 	if (plan->useStage1)
 		runStagedLaunch(plan);
+
+	if (plan->useBiosExec)
+		runExecLaunch(plan);
 
 	runDirectLaunch(plan);
 }
