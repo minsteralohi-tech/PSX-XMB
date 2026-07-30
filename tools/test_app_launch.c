@@ -1,0 +1,302 @@
+/*
+ * Host tests for src/main/app_launch.c's planner.
+ *
+ * Builds the dashboard's own planner source on a PC and checks the decisions
+ * that decide whether a launch works or produces a black screen: arena
+ * selection against every target this project actually ships, overlap rules,
+ * zero-fill range construction, and rejection of malformed headers.
+ *
+ *   make -C tools -f Makefile.tests
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include "main/app_launch.h"
+
+extern uint32_t appTestImageEnd;
+
+static int failures;
+static int checks;
+
+#define CHECK(cond) do {                                               \
+	checks++;                                                          \
+	if (!(cond)) {                                                     \
+		failures++;                                                    \
+		printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
+	}                                                                  \
+} while (0)
+
+#define CHECK_RESULT(got, want) do {                                   \
+	AppPlanResult g_ = (got);                                          \
+	checks++;                                                          \
+	if (g_ != (want)) {                                                \
+		failures++;                                                    \
+		printf("  FAIL %s:%d: expected %s, got %s\n", __FILE__,        \
+		       __LINE__, appPlanResultText(want),                      \
+		       appPlanResultText(g_));                                 \
+	}                                                                  \
+} while (0)
+
+/* A fake embedded blob: 2048-byte header plus a little payload. Its address
+ * inside this test process stands in for .rodata inside the dashboard. */
+static uint8_t exeBuffer[PSEXE_PAYLOAD_OFFSET + 0x2000];
+
+static void makeExe(uint32_t pc, uint32_t load, uint32_t size,
+                    uint32_t bssAddr, uint32_t bssSize, uint32_t sp) {
+	PSEXEHeader *h = (PSEXEHeader *) exeBuffer;
+
+	memset(exeBuffer, 0, sizeof(exeBuffer));
+	memcpy(h->magic, "PS-X EXE", 8);
+	h->pc       = pc;
+	h->textAddr = load;
+	h->textSize = size;
+	h->bssAddr  = bssAddr;
+	h->bssSize  = bssSize;
+	h->spBase   = sp;
+}
+
+static int fillsCover(const AppLaunchPlan *plan, uint32_t addr) {
+	for (uint32_t i = 0; i < plan->fillCount; i++) {
+		if (addr >= plan->fillStart[i] &&
+		    addr < plan->fillStart[i] + plan->fillBytes[i])
+			return 1;
+	}
+
+	return 0;
+}
+
+static void testStandaloneSIOLoader(void) {
+	printf("standalone SIO loader (0x801b0000, 6144 bytes)\n");
+
+	/* Exactly the header of the shipped assets/sioloader.exe. */
+	makeExe(0x801b0000, 0x801b0000, 0x1800, 0x801b1770, 2064, 0x801bdff0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	CHECK(plan.dest == 0x801b0000);
+	CHECK(plan.destEnd == 0x801b1800);
+	CHECK(plan.entry == 0x801b0000);
+	CHECK(plan.sp == 0x801bdff0);
+
+	/* Top of RAM is clear of both the loader and its BSS, so it wins. */
+	CHECK(plan.arena == 0x801ff000);
+
+	/* Without eraseRam the only fill is the PS-EXE memfill, rounded up to a
+	 * whole number of words. */
+	CHECK(plan.fillCount == 1);
+	CHECK(plan.fillStart[0] == 0x801b1770);
+	CHECK(plan.fillBytes[0] == ((2064 + 3) & ~3u));
+}
+
+static void testUniROM(void) {
+	printf("UniROM 8.0.K (0x801d0000, 135168 bytes)\n");
+
+	makeExe(0x801d0000, 0x801d0000, 0x21000, 0, 0, 0x801fff00);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	/* UniROM ends at 0x801f1000, so the top-of-RAM arena is still clear.
+	 * Its stack starts at 0x801fff00 and grows down through the arena, but
+	 * stage 1 has jumped long before UniROM pushes anything. */
+	CHECK(plan.arena == 0x801ff000);
+	CHECK(plan.destEnd == 0x801f1000);
+	CHECK(plan.fillCount == 0);
+}
+
+static void testCDLoader(void) {
+	printf("cdloader.exe (0x801ea300, occupies the top of RAM)\n");
+
+	makeExe(0x801ea300, 0x801ea300, 0x15c00, 0, 0, 0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	/* The top-of-RAM candidate is inside this target, so the planner must
+	 * fall back rather than install stage 1 into the payload. */
+	CHECK(plan.arena == 0x801e0000);
+	CHECK(plan.arena + APP_ARENA_SIZE <= plan.dest);
+
+	/* spBase == 0 in the header means the BIOS default. */
+	CHECK(plan.sp == 0x801fff00);
+}
+
+static void testOrdinaryHomebrew(void) {
+	printf("ordinary homebrew at 0x80010000\n");
+
+	makeExe(0x80010000, 0x80010000, 0x40000, 0x80050000, 0x1000, 0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.arena == 0x801ff000);
+}
+
+static void testArenaAvoidsSourceBlob(void) {
+	printf("arena never lands on the embedded blob it is copying from\n");
+
+	/* A target loading exactly where the source blob happens to sit is the
+	 * pathological case; the arena must still clear both. */
+	makeExe(0x80010000, 0x80010000, 0x1000, 0, 0, 0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	uint32_t arenaStart = plan.arena;
+	uint32_t arenaEnd   = plan.arena + APP_ARENA_SIZE;
+
+	CHECK(!(arenaStart < plan.destEnd && plan.dest < arenaEnd));
+	CHECK(!(arenaStart < plan.src + plan.bodySize && plan.src < arenaEnd));
+}
+
+static void testArenaClearsDashboardImage(void) {
+	printf("arena is never inside the dashboard's own image\n");
+
+	makeExe(0x80010000, 0x80010000, 0x1000, 0, 0, 0);
+
+	/* A much fatter dashboard build must push the arena upward rather than
+	 * install stage 1 over a global the dashboard is still reading. */
+	appTestImageEnd = 0x801d0000;
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.arena >= 0x801d0000 || plan.arena < APP_RAM_BASE);
+	CHECK(plan.arena == 0x801ff000);
+
+	/* And if the dashboard somehow filled main RAM entirely, the only
+	 * remaining home is BIOS kernel scratch. */
+	appTestImageEnd = 0x801ffff0;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.arena == 0x8000c000);
+
+	appTestImageEnd = 0x801a6000;
+}
+
+static void testEraseRamFills(void) {
+	printf("erase-RAM fill list\n");
+
+	makeExe(0x801b0000, 0x801b0000, 0x1800, 0x801b1770, 2064, 0x801bdff0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 1, &plan), APP_PLAN_OK);
+
+	/* Everything below the loader, everything above it, split around the
+	 * arena, plus the BSS memfill. */
+	CHECK(plan.fillCount >= 3);
+
+	/* The dashboard itself is erased... */
+	CHECK(fillsCover(&plan, APP_RAM_BASE));
+	CHECK(fillsCover(&plan, 0x80100000));
+
+	/* ...but never the code we just copied. Note the tail of the padded
+	 * payload legitimately IS covered: this loader's own .bss begins at
+	 * 0x801b1770, inside the 0x1800-byte padded body, so the memfill zeroes
+	 * it exactly as the BIOS would after a LoadExec. Only the region below
+	 * the BSS start must survive. */
+	CHECK(!fillsCover(&plan, plan.dest));
+	CHECK(!fillsCover(&plan, plan.dest + 0x1000));
+	CHECK(!fillsCover(&plan, 0x801b176c));
+
+	/* nor stage 1, its parameters or its fill list, */
+	CHECK(!fillsCover(&plan, plan.arena));
+	CHECK(!fillsCover(&plan, plan.arena + APP_ARENA_PARAM_OFF));
+	CHECK(!fillsCover(&plan, plan.arena + APP_ARENA_SIZE - 4));
+
+	/* nor anything the BIOS owns below 0x80010000. */
+	CHECK(!fillsCover(&plan, 0x8000c800));
+	CHECK(!fillsCover(&plan, 0x80000080));
+	CHECK(!fillsCover(&plan, 0x80000200));
+
+	/* The gap on either side of the arena is still cleared. */
+	CHECK(fillsCover(&plan, plan.arena - 4));
+
+	for (uint32_t i = 0; i < plan.fillCount; i++) {
+		CHECK(plan.fillStart[i] >= APP_RAM_BASE);
+		CHECK(plan.fillStart[i] + plan.fillBytes[i] <= APP_RAM_TOP);
+	}
+}
+
+static void testRejections(void) {
+	printf("rejections\n");
+
+	AppLaunchPlan plan;
+
+	makeExe(0x801b0000, 0x801b0000, 0x1800, 0, 0, 0);
+	exeBuffer[3] = 'Y';
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_BAD_MAGIC);
+
+	makeExe(0x801b0000, 0x801b0000, 0, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_BAD_SIZE);
+
+	/* Into BIOS/kernel RAM. */
+	makeExe(0x80000500, 0x80000500, 0x1000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_DEST_RANGE);
+
+	/* Off the end of 2 MB. */
+	makeExe(0x801f0000, 0x801f0000, 0x20000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_DEST_RANGE);
+
+	/* Wrapping past 2^32 rather than looking like a tiny range near zero. */
+	makeExe(0x801ffffc, 0x801ffffc, 0xfffff000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_DEST_RANGE);
+
+	makeExe(0x801b0002, 0x801b0002, 0x1000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_UNALIGNED);
+
+	/* Entry outside the loaded image. */
+	makeExe(0x80040000, 0x801b0000, 0x1000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_ENTRY_RANGE);
+
+	makeExe(0x801b0000, 0x801b0000, 0x1000, 0, 0, 0x00000010);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_SP_RANGE);
+
+	makeExe(0x801b0000, 0x801b0000, 0x1000, 0x801ff000, 0x8000, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_BSS_RANGE);
+}
+
+static void testBssPushesArenaAside(void) {
+	printf("a target whose BSS covers the top of RAM moves the arena\n");
+
+	/* Payload low, but a memfill that runs right through 0x801ff000 and
+	 * past it - 0xf000 would end exactly at the arena and legitimately not
+	 * overlap, so the range has to genuinely cover it. */
+	makeExe(0x80010000, 0x80010000, 0x1000, 0x801f0000, 0xf800, 0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	CHECK(plan.arena != 0x801ff000);
+	CHECK(plan.arena + APP_ARENA_SIZE <= 0x801f0000 ||
+	      plan.arena < APP_RAM_BASE);
+}
+
+static void testPhysicalAddressesAreCanonicalised(void) {
+	printf("KUSEG and KSEG1 header addresses become KSEG0\n");
+
+	makeExe(0x001b0000, 0x001b0000, 0x1000, 0, 0, 0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.dest == 0x801b0000);
+	CHECK(plan.entry == 0x801b0000);
+
+	makeExe(0xa01b0000, 0xa01b0000, 0x1000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.dest == 0x801b0000);
+}
+
+int main(void) {
+	testStandaloneSIOLoader();
+	testUniROM();
+	testCDLoader();
+	testOrdinaryHomebrew();
+	testArenaAvoidsSourceBlob();
+	testArenaClearsDashboardImage();
+	testEraseRamFills();
+	testRejections();
+	testBssPushesArenaAside();
+	testPhysicalAddressesAreCanonicalised();
+
+	printf("\n%d checks, %d failures\n", checks, failures);
+	return failures ? 1 : 0;
+}

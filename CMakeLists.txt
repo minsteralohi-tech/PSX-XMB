@@ -91,8 +91,9 @@ addPS1Executable(
 	src/main/bios_calls.s
 	src/main/hud.c
 	src/main/badge.c
-	src/main/sio_loader.c
-	src/main/sio_staged_stub.s
+	src/main/sio_launch.c
+	src/main/app_launch.c
+	src/main/app_stub.s
 	src/main/music_settings.c
 	src/main/unirom_launch.c
 	src/main/handoff.c
@@ -178,6 +179,11 @@ addBinaryFile("${RELEASE_NAME}" cdloaderExe assets/cdloader.exe)
 # Loader reimplementation - once real UniROM is running, its own serial EXE
 # loading is exactly what it always is.
 addBinaryFile("${RELEASE_NAME}" uniromExe assets/unirom_bin.exe)
+
+# Standalone SIO1 PS-EXE loader, launched from Settings -> SIO Loader via
+# the two-stage handoff in src/main/app_launch.c. This is a separately
+# built, hardware-proven program; the dashboard only carries and starts it.
+addBinaryFile("${RELEASE_NAME}" sioLoaderExe assets/sioloader.exe)
 
 ## CD-ROM image
 

@@ -1,0 +1,164 @@
+# Two-stage app launcher — what changed and why
+
+The dashboard no longer contains a serial receiver. Serial loading is now the
+standalone SIO loader PS-EXE (`assets/sioloader.exe`), embedded as a blob and
+started through a generic two-stage handoff that is reusable for any other
+standalone program — UniROM, a 240p test suite build, whatever comes next.
+
+## Removed
+
+| File | Why |
+|---|---|
+| `src/main/sio_loader.c` (535 lines) | The whole dashboard-resident NoPS receiver. Superseded by the standalone loader |
+| `src/main/sio_loader.h` | ditto |
+| `src/main/sio_staged_stub.s` | Its trampoline, pinned at `0x8000c800` |
+| `src/main/sio_miniloader.s` | Already dead — was not in the CMake source list |
+| `launchStagedPSEXE()` in `handoff.c`/`.h` | The staged-receive handoff it existed to serve is gone |
+
+`quiesceForHandoff()`, `launchPSEXEImage()` and `jumpToLoadedEXE()` are
+untouched. Fast Boot and Tools → UniROM 8.0 still use the exact path they use
+today; this change does not go near them.
+
+## Added
+
+| File | Role |
+|---|---|
+| `src/main/app_launch.h` / `.c` | Plans and executes a two-stage handoff for any embedded PS-EXE |
+| `src/main/app_stub.s` | Stage 1: ~230 bytes, position independent, no absolute addresses |
+| `src/main/sio_launch.h` / `.c` | Settings → SIO Loader: shows the plan, confirms, launches |
+| `assets/sioloader.exe` | The proven standalone loader, 8192 bytes |
+| `tools/test_app_launch.c`, `tools/Makefile.tests` | Host tests for the planner |
+
+`CMakeLists.txt` swaps the source list entries and adds
+`addBinaryFile(... sioLoaderExe assets/sioloader.exe)`. `xmb_menu.c` changes by
+exactly one line — its `#include` — so the `settingsItems[]` table and the
+`runSIOLoader` entry name stay as they were.
+
+## Why two stages
+
+The dashboard is huge. Its PS-EXE payload is about 1.59 MB, so it occupies
+roughly `0x80010000`–`0x8019c800` before `.bss`, and `.bss` pushes `_imageEnd`
+higher still. The PCSX-Redux session log confirms the runtime shape:
+
+```
+pc=800118ec sp=8019e0c8 gp=801a41d0
+```
+
+The stack is a static 8 KB buffer inside the image (`crt0.s`), not at the top
+of RAM, and the heap grows from `_bssEnd` toward `0x80200000`.
+
+Almost anything worth launching wants RAM the dashboard is sitting in. The
+old single-stage `launchPSEXEImage()` copies the payload from C code that is
+executing out of the region being overwritten — it works today only because
+the embedded blobs happen to sit below every load address in use, and it
+offers no way to clear the dashboard out of RAM at all, because the code doing
+the clearing would be the first casualty.
+
+So:
+
+```
+stage 0   dashboard   pick an arena, validate, quiesce, install stage 1
+stage 1   arena       copy payload -> zero-fill -> memfill BSS ->
+                      FlushCache -> set $gp/$sp -> jump
+stage 2   target      the launched program
+```
+
+Nothing returns to C once stage 1 starts.
+
+## Picking the arena
+
+There is no single address that is free for every target, which is what made
+the old fixed `0x8000c800` fragile:
+
+| Target | Occupies |
+|---|---|
+| standalone SIO loader | `0x801b0000`–`0x801c0000` |
+| UniROM 8.0.K | `0x801d0000`–`0x801f1000` |
+| `cdloader.exe` | `0x801ea300`–`0x80200000` |
+| ordinary homebrew | `0x80010000` upward |
+
+So the arena is chosen at run time from a candidate list — `0x801ff000`,
+`0x801e0000`, `0x801c8000`, then BIOS kernel scratch `0x8000c000` as a last
+resort — taking the first that provably clears the destination, the source
+blob and the target's BSS. Candidates in main RAM must also sit at or above
+the dashboard's own `_imageEnd`, so installing stage 1 cannot corrupt a global
+the dashboard is still reading between the install and the jump.
+
+Kernel scratch is last on purpose: nothing documents it as free, and the
+kernel's event/thread control blocks — plus a resident cheat cartridge's
+hooks — live in that 64 KB. It exists only so a target wanting all of
+`0x801c8000`–`0x80200000` still has somewhere to put stage 1.
+
+For the SIO loader the planner picks `0x801ff000`, and the confirmation screen
+shows it before anything is committed.
+
+## Erasing the dashboard
+
+`planEmbeddedApp(exe, eraseRam, &plan)` takes a flag. When set, stage 1 zeroes
+all of main RAM except the payload it just copied, the arena, and everything
+below `0x80010000`. The fill list is built in C as explicit ranges, with the
+arena punched out — which can split one range in two — so stage 1 itself can
+never be erased by its own fill.
+
+`SIO_LOADER_ERASE_RAM` in `sio_launch.c` is **0**. The standalone loader
+validates and stages everything itself and does not assume a cold-boot RAM
+state; the BIOS does not zero RAM on `LoadExec` either. Set it to 1 for a
+target that genuinely needs clean RAM — it is safe either way.
+
+## Order of operations in stage 1
+
+1. Move the payload, direction-aware. The blob lives in `.rodata` and the
+   destination is frequently *below* it, so both copy directions are used.
+2. Walk the zero-fill list. This is where the dashboard is erased and where
+   the target's PS-EXE memfill happens.
+3. Switch `$sp` to the target's stack **before** the BIOS call — the
+   dashboard's stack is inside the image and step 2 may just have zeroed it.
+4. BIOS `A(44h)` FlushCache.
+5. Set `$gp`, jump to the entry point.
+
+## Tests
+
+`make -C tools -f Makefile.tests` builds `src/main/app_launch.c` with the host
+compiler and runs 64 checks: arena selection for the SIO loader, UniROM,
+`cdloader.exe` and ordinary homebrew; the arena never landing on the payload,
+the source blob, the target's BSS or the dashboard's image; fill ranges never
+covering the payload, the arena or BIOS RAM; and rejection of bad magic, zero
+size, kernel-RAM destinations, ranges that wrap past 2³², unaligned addresses,
+out-of-image entry points and bad stack pointers.
+
+The CI workflow runs this before the toolchain and build steps, so a planner
+regression fails in seconds rather than after a full build.
+
+Note one deliberate behaviour the tests pin down: the SIO loader's own `.bss`
+starts at `0x801b1770`, *inside* its 0x1800-byte padded body, so the memfill
+zeroes the tail of the copied payload. That is correct and is exactly what the
+BIOS does after a `LoadExec`.
+
+## Adding another launchable app later
+
+1. Drop the `.exe` in `assets/`.
+2. `addBinaryFile("${RELEASE_NAME}" myAppExe assets/myapp.exe)` in
+   `CMakeLists.txt`.
+3. `extern const uint8_t myAppExe[];` and call
+   `launchEmbeddedApp(myAppExe, 0)`, or `planEmbeddedApp()` first if you want
+   to show the plan and confirm.
+
+If the planner refuses, it says why rather than jumping — `appPlanResultText()`
+gives the reason, and the SIO Loader screen already displays it.
+
+## Not yet verified
+
+The planner logic is tested on the host. Stage 1 itself, the erase path and
+the launch have **not** been run on hardware or in an emulator here. The
+assembly is a direct extension of the trampoline in the standalone loader that
+is already proven on your console — the copy, cache flush and register handoff
+are unchanged; the fill-list walk is new.
+
+Worth testing in this order:
+
+1. Settings → SIO Loader → confirm the plan screen shows
+   `Loader 801B0000 - 801B1800`, `Stage 1 801FF000`.
+2. Press X; the loader's blue waiting band should appear.
+3. Send an EXE and confirm it launches, as it already does standalone.
+4. Only then try flipping `SIO_LOADER_ERASE_RAM` to 1, which exercises the
+   fill path.

@@ -1,0 +1,556 @@
+
+Discarded input sections
+
+ .text          0x00000000        0x0 src/audio.o
+ .data          0x00000000        0x0 src/audio.o
+ .bss           0x00000000        0x0 src/audio.o
+ .reginfo       0x00000000       0x18 src/audio.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/audio.o
+ .pdr           0x00000000       0x20 src/audio.o
+ .mdebug.abi32  0x00000000        0x0 src/audio.o
+ .rodata.SPU_VOICES
+                0x00000000        0x4 src/audio.o
+ .comment       0x00000000       0x2c src/audio.o
+ .gnu.attributes
+                0x00000000       0x10 src/audio.o
+ .text          0x00000000        0x0 src/bios.o
+ .data          0x00000000        0x0 src/bios.o
+ .bss           0x00000000        0x0 src/bios.o
+ .reginfo       0x00000000       0x18 src/bios.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/bios.o
+ .pdr           0x00000000      0x140 src/bios.o
+ .mdebug.abi32  0x00000000        0x0 src/bios.o
+ .text.bios_is_european
+                0x00000000       0x1c src/bios.o
+ .text.bios_get_syscall_handler
+                0x00000000       0x24 src/bios.o
+ .rodata.tty_enabled
+                0x00000000        0x4 src/bios.o
+ .comment       0x00000000       0x2c src/bios.o
+ .gnu.attributes
+                0x00000000       0x10 src/bios.o
+ .text          0x00000000        0x0 src/cdrom.o
+ .data          0x00000000        0x0 src/cdrom.o
+ .bss           0x00000000        0x0 src/cdrom.o
+ .reginfo       0x00000000       0x18 src/cdrom.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/cdrom.o
+ .pdr           0x00000000       0xe0 src/cdrom.o
+ .mdebug.abi32  0x00000000        0x0 src/cdrom.o
+ .text.cd_drive_reset
+                0x00000000       0x64 src/cdrom.o
+ .rodata.CD_REGS
+                0x00000000        0x4 src/cdrom.o
+ .comment       0x00000000       0x2c src/cdrom.o
+ .gnu.attributes
+                0x00000000       0x10 src/cdrom.o
+ .text          0x00000000        0x0 src/cfgparse.o
+ .data          0x00000000        0x0 src/cfgparse.o
+ .bss           0x00000000        0x0 src/cfgparse.o
+ .reginfo       0x00000000       0x18 src/cfgparse.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/cfgparse.o
+ .pdr           0x00000000       0x60 src/cfgparse.o
+ .mdebug.abi32  0x00000000        0x0 src/cfgparse.o
+ .comment       0x00000000       0x2c src/cfgparse.o
+ .gnu.attributes
+                0x00000000       0x10 src/cfgparse.o
+ .text          0x00000000        0x0 src/compiler_rt.o
+ .data          0x00000000        0x0 src/compiler_rt.o
+ .bss           0x00000000        0x0 src/compiler_rt.o
+ .reginfo       0x00000000       0x18 src/compiler_rt.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/compiler_rt.o
+ .pdr           0x00000000       0x40 src/compiler_rt.o
+ .mdebug.abi32  0x00000000        0x0 src/compiler_rt.o
+ .text.memset   0x00000000       0x24 src/compiler_rt.o
+ .text.memmove  0x00000000       0x64 src/compiler_rt.o
+ .comment       0x00000000       0x2c src/compiler_rt.o
+ .note.GNU-stack
+                0x00000000        0x0 src/compiler_rt.o
+ .gnu.attributes
+                0x00000000       0x10 src/compiler_rt.o
+ .text          0x00000000        0x0 src/font.o
+ .data          0x00000000        0x0 src/font.o
+ .bss           0x00000000        0x0 src/font.o
+ .reginfo       0x00000000       0x18 src/font.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/font.o
+ .pdr           0x00000000        0x0 src/font.o
+ .mdebug.abi32  0x00000000        0x0 src/font.o
+ .comment       0x00000000       0x2c src/font.o
+ .gnu.attributes
+                0x00000000       0x10 src/font.o
+ .text          0x00000000        0x0 src/game_id.o
+ .data          0x00000000        0x0 src/game_id.o
+ .bss           0x00000000        0x0 src/game_id.o
+ .reginfo       0x00000000       0x18 src/game_id.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/game_id.o
+ .pdr           0x00000000       0x80 src/game_id.o
+ .mdebug.abi32  0x00000000        0x0 src/game_id.o
+ .comment       0x00000000       0x2c src/game_id.o
+ .gnu.attributes
+                0x00000000       0x10 src/game_id.o
+ .text          0x00000000        0x0 src/gameid_psx_exe.o
+ .data          0x00000000        0x0 src/gameid_psx_exe.o
+ .bss           0x00000000        0x0 src/gameid_psx_exe.o
+ .reginfo       0x00000000       0x18 src/gameid_psx_exe.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/gameid_psx_exe.o
+ .pdr           0x00000000       0x20 src/gameid_psx_exe.o
+ .mdebug.abi32  0x00000000        0x0 src/gameid_psx_exe.o
+ .comment       0x00000000       0x2c src/gameid_psx_exe.o
+ .gnu.attributes
+                0x00000000       0x10 src/gameid_psx_exe.o
+ .text          0x00000000        0x0 src/gpu.o
+ .data          0x00000000        0x0 src/gpu.o
+ .bss           0x00000000        0x0 src/gpu.o
+ .reginfo       0x00000000       0x18 src/gpu.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/gpu.o
+ .pdr           0x00000000      0x1a0 src/gpu.o
+ .mdebug.abi32  0x00000000        0x0 src/gpu.o
+ .text.gpu_copy_rectangle
+                0x00000000       0x58 src/gpu.o
+ .comment       0x00000000       0x2c src/gpu.o
+ .gnu.attributes
+                0x00000000       0x10 src/gpu.o
+ .text          0x00000000        0x0 src/loader.o
+ .data          0x00000000        0x0 src/loader.o
+ .bss           0x00000000        0x0 src/loader.o
+ .reginfo       0x00000000       0x18 src/loader.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/loader.o
+ .pdr           0x00000000       0xc0 src/loader.o
+ .mdebug.abi32  0x00000000        0x0 src/loader.o
+ .comment       0x00000000       0x2c src/loader.o
+ .gnu.attributes
+                0x00000000       0x10 src/loader.o
+ .text          0x00000000        0x0 src/main.o
+ .data          0x00000000        0x0 src/main.o
+ .bss           0x00000000        0x0 src/main.o
+ .reginfo       0x00000000       0x18 src/main.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/main.o
+ .pdr           0x00000000       0x20 src/main.o
+ .mdebug.abi32  0x00000000        0x0 src/main.o
+ .comment       0x00000000       0x2c src/main.o
+ .gnu.attributes
+                0x00000000       0x10 src/main.o
+ .text          0x00000000        0x0 src/screen.o
+ .data          0x00000000        0x0 src/screen.o
+ .bss           0x00000000        0x0 src/screen.o
+ .reginfo       0x00000000       0x18 src/screen.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/screen.o
+ .pdr           0x00000000      0x100 src/screen.o
+ .mdebug.abi32  0x00000000        0x0 src/screen.o
+ .comment       0x00000000       0x2c src/screen.o
+ .gnu.attributes
+                0x00000000       0x10 src/screen.o
+ .text          0x00000000        0x0 src/str.o
+ .data          0x00000000        0x0 src/str.o
+ .bss           0x00000000        0x0 src/str.o
+ .reginfo       0x00000000       0x18 src/str.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/str.o
+ .pdr           0x00000000       0x80 src/str.o
+ .mdebug.abi32  0x00000000        0x0 src/str.o
+ .text.mini_sprintf
+                0x00000000       0x2c src/str.o
+ .comment       0x00000000       0x2c src/str.o
+ .gnu.attributes
+                0x00000000       0x10 src/str.o
+ .text          0x00000000        0x0 src/util.o
+ .data          0x00000000        0x0 src/util.o
+ .bss           0x00000000        0x0 src/util.o
+ .reginfo       0x00000000       0x18 src/util.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/util.o
+ .pdr           0x00000000       0x20 src/util.o
+ .mdebug.abi32  0x00000000        0x0 src/util.o
+ .text.delay_ds
+                0x00000000       0x4c src/util.o
+ .comment       0x00000000       0x2c src/util.o
+ .note.GNU-stack
+                0x00000000        0x0 src/util.o
+ .gnu.attributes
+                0x00000000       0x10 src/util.o
+ .data          0x00000000        0x0 src/bioscalls.o
+ .bss           0x00000000        0x0 src/bioscalls.o
+ .reginfo       0x00000000       0x18 src/bioscalls.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/bioscalls.o
+ .pdr           0x00000000        0x0 src/bioscalls.o
+ .gnu.attributes
+                0x00000000       0x10 src/bioscalls.o
+ .data          0x00000000        0x0 src/memcardpro.o
+ .bss           0x00000000        0x0 src/memcardpro.o
+ .reginfo       0x00000000       0x18 src/memcardpro.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/memcardpro.o
+ .pdr           0x00000000        0x0 src/memcardpro.o
+ .gnu.attributes
+                0x00000000       0x10 src/memcardpro.o
+ .text          0x00000000        0x0 src/start.o
+ .data          0x00000000        0x0 src/start.o
+ .bss           0x00000000        0x0 src/start.o
+ .reginfo       0x00000000       0x18 src/start.o
+ .MIPS.abiflags
+                0x00000000       0x18 src/start.o
+ .pdr           0x00000000        0x0 src/start.o
+ .gnu.attributes
+                0x00000000       0x10 src/start.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+ram              0x801ea300         0x00015c00         xrw
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+                0x801ea300                        . = ORIGIN (ram)
+                0x801ea300                        PROVIDE (__RO_START__ = .)
+
+.note.gnu.build-id
+                0x801ea300       0x24
+ .note.gnu.build-id
+                0x801ea300       0x24 src/audio.o
+
+.start          0x801ea324       0x44
+ *(.start)
+ .start         0x801ea324       0x44 src/start.o
+                0x801ea324                _start
+
+.text           0x801ea370     0x37b0
+ *(.text .text.*)
+ .text.audio_halt
+                0x801ea370       0x38 src/audio.o
+                0x801ea370                audio_halt
+ .text.logging_disc_error_handler
+                0x801ea3a8       0x14 src/bios.o
+                0x801ea3a8                logging_disc_error_handler
+ .text.bios_is_ps1
+                0x801ea3bc       0x30 src/bios.o
+                0x801ea3bc                bios_is_ps1
+ .text.parse_warmboot_jal
+                0x801ea3ec       0x30 src/bios.o
+                0x801ea3ec                parse_warmboot_jal
+ .text.bios_copy_relocated_kernel
+                0x801ea41c       0x20 src/bios.o
+                0x801ea41c                bios_copy_relocated_kernel
+ .text.bios_copy_a0_table
+                0x801ea43c       0x20 src/bios.o
+                0x801ea43c                bios_copy_a0_table
+ .text.bios_reinitialize
+                0x801ea45c       0xc4 src/bios.o
+                0x801ea45c                bios_reinitialize
+ .text.bios_inject_disc_error
+                0x801ea520       0x10 src/bios.o
+                0x801ea520                bios_inject_disc_error
+ .text.bios_restore_disc_error
+                0x801ea530       0x10 src/bios.o
+                0x801ea530                bios_restore_disc_error
+ .text.cd_command
+                0x801ea540       0x6c src/cdrom.o
+                0x801ea540                cd_command
+ .text.cd_command_race
+                0x801ea5ac       0x54 src/cdrom.o
+                0x801ea5ac                cd_command_race
+ .text.cd_wait_int
+                0x801ea600       0x44 src/cdrom.o
+                0x801ea600                cd_wait_int
+ .text.cd_wait_int_race
+                0x801ea644       0x30 src/cdrom.o
+                0x801ea644                cd_wait_int_race
+ .text.cd_read_reply
+                0x801ea674       0x44 src/cdrom.o
+                0x801ea674                cd_read_reply
+ .text.cd_drive_init
+                0x801ea6b8       0x2c src/cdrom.o
+                0x801ea6b8                cd_drive_init
+ .text.find_wanted
+                0x801ea6e4       0x90 src/cfgparse.o
+                0x801ea6e4                find_wanted
+ .text.config_get_hex
+                0x801ea774       0x94 src/cfgparse.o
+                0x801ea774                config_get_hex
+ .text.config_get_string
+                0x801ea808       0xa8 src/cfgparse.o
+                0x801ea808                config_get_string
+ .text.disc_leaf
+                0x801ea8b0       0x54 src/game_id.o
+ .text.append_text.constprop.0
+                0x801ea904       0x50 src/game_id.o
+ .text.game_id_needs_disc_lookup
+                0x801ea954       0x94 src/game_id.o
+                0x801ea954                game_id_needs_disc_lookup
+ .text.game_id_send
+                0x801ea9e8      0x238 src/game_id.o
+                0x801ea9e8                game_id_send
+ .text.get_psx_exe_gameid
+                0x801eac20     0x1090 src/gameid_psx_exe.o
+                0x801eac20                get_psx_exe_gameid
+ .text.gpu_is_pal
+                0x801ebcb0       0x18 src/gpu.o
+                0x801ebcb0                gpu_is_pal
+ .text.gpu_wait_vblank
+                0x801ebcc8       0x3c src/gpu.o
+                0x801ebcc8                gpu_wait_vblank
+ .text.gpu_reset
+                0x801ebd04        0x8 src/gpu.o
+                0x801ebd04                gpu_reset
+ .text.gpu_display_mode
+                0x801ebd0c        0xc src/gpu.o
+                0x801ebd0c                gpu_display_mode
+ .text.gpu_display_enable
+                0x801ebd18        0x8 src/gpu.o
+                0x801ebd18                gpu_display_enable
+ .text.gpu_display_disable
+                0x801ebd20        0xc src/gpu.o
+                0x801ebd20                gpu_display_disable
+ .text.gpu_draw_solid_rect
+                0x801ebd2c       0x64 src/gpu.o
+                0x801ebd2c                gpu_draw_solid_rect
+ .text.gpu_draw_tex_rect
+                0x801ebd90       0xc0 src/gpu.o
+                0x801ebd90                gpu_draw_tex_rect
+ .text.gpu_set_drawing_area
+                0x801ebe50       0x78 src/gpu.o
+                0x801ebe50                gpu_set_drawing_area
+ .text.gpu_flush_cache
+                0x801ebec8        0x8 src/gpu.o
+                0x801ebec8                gpu_flush_cache
+ .text.gpu_set_hrange
+                0x801ebed0       0x14 src/gpu.o
+                0x801ebed0                gpu_set_hrange
+ .text.gpu_set_vrange
+                0x801ebee4       0x14 src/gpu.o
+                0x801ebee4                gpu_set_vrange
+ .text.backdoor_cmd
+                0x801ebef8       0xa0 src/loader.o
+ .text.wait_lid_status
+                0x801ebf98       0x60 src/loader.o
+ .text.cdr_80_min_assist
+                0x801ebff8       0x80 src/loader.o
+ .text.re_cd_init
+                0x801ec078       0x98 src/loader.o
+ .text.loader_init_drive
+                0x801ec110      0x310 src/loader.o
+                0x801ec110                loader_init_drive
+ .text.loader_boot_disc
+                0x801ec420      0x62c src/loader.o
+                0x801ec420                loader_boot_disc
+ .text.startup.main
+                0x801eca4c       0x84 src/main.o
+                0x801eca4c                main
+ .text.set_video_mode
+                0x801ecad0       0x70 src/screen.o
+ .text.set_draw_env
+                0x801ecb40       0x50 src/screen.o
+ .text.draw_glyph_small
+                0x801ecb90       0x9c src/screen.o
+ .text.draw_header
+                0x801ecc2c      0x1d0 src/screen.o
+ .text.redraw   0x801ecdfc       0xe0 src/screen.o
+ .text.debug_init
+                0x801ecedc      0x1f8 src/screen.o
+                0x801ecedc                debug_init
+ .text.debug_switch_standard
+                0x801ed0d4       0x3c src/screen.o
+                0x801ed0d4                debug_switch_standard
+ .text.debug_write
+                0x801ed110      0x198 src/screen.o
+                0x801ed110                debug_write
+ .text.isspace  0x801ed2a8       0x24 src/str.o
+                0x801ed2a8                isspace
+ .text.mini_vsprintf
+                0x801ed2cc      0x2c4 src/str.o
+                0x801ed2cc                mini_vsprintf
+ .text.bzero    0x801ed590       0x20 src/str.o
+                0x801ed590                bzero
+ .text          0x801ed5b0      0x140 src/bioscalls.o
+                0x801ed5b0                FakeEnqueueCdIntr
+                0x801ed5c0                EnterCriticalSection
+                0x801ed5d0                ExitCriticalSection
+                0x801ed5e0                todigit
+                0x801ed5e8                strcmp
+                0x801ed5f0                strncmp
+                0x801ed5f8                strcpy
+                0x801ed600                strlen
+                0x801ed608                strchr
+                0x801ed610                memcpy
+                0x801ed618                DoExecute
+                0x801ed638                FlushCache
+                0x801ed640                init_a0_b0_c0_vectors
+                0x801ed648                GPU_dw
+                0x801ed650                SendGP1Command
+                0x801ed658                GPU_cw
+                0x801ed660                GPU_cwp
+                0x801ed668                LoadAndExecute
+                0x801ed670                CdInit
+                0x801ed678                SetConf
+                0x801ed680                CdReadSector
+                0x801ed688                CdGetLbn
+                0x801ed690                SetMemSize
+                0x801ed698                SetDefaultExitFromException
+                0x801ed6a0                FileOpen
+                0x801ed6a8                FileRead
+                0x801ed6b0                FileClose
+                0x801ed6b8                FormatDevice
+                0x801ed6c0                GetLastError
+                0x801ed6c8                GetC0Table
+                0x801ed6d0                GetB0Table
+                0x801ed6d8                InstallExceptionHandlers
+                0x801ed6e0                InstallDevices
+                0x801ed6e8                AdjustA0Table
+ .text          0x801ed6f0      0x430 src/memcardpro.o
+                0x801ed6f0                MemCardPro_SendGameID
+                0x801ed808                MemcardPro_SimpleCommand
+                0x801ed93c                MemCardPro_Ping
+                0x801ed960                MemCardPro_NextCH
+                0x801ed984                MemCardPro_PrevCH
+                0x801ed9a8                MemCardPro_NextDIR
+                0x801ed9cc                MemCardPro_PrevDIR
+                0x801ed9f0                MemCardPro_Exchng
+                0x801edae4                MemCardPro_Wait
+                0x801edaf8                MemcardPro_InterCommandDelay
+
+.rodata         0x801edb20     0x20e8
+ *(.rodata .rodata.*)
+ .rodata.logging_disc_error_handler.str1.4
+                0x801edb20     0x12a0 src/bios.o
+                                 0x1c (size before relaxing)
+ .rodata.bios_is_ps1.str1.4
+                0x801eedc0        0x4 src/bios.o
+ .rodata.find_wanted.str1.4
+                0x801eedc0        0xc src/cfgparse.o
+ .rodata.font_last
+                0x801eedc0        0x4 src/font.o
+                0x801eedc0                font_last
+ .rodata.font_first
+                0x801eedc4        0x4 src/font.o
+                0x801eedc4                font_first
+ .rodata.font16x16
+                0x801eedc8      0xb60 src/font.o
+                0x801eedc8                font16x16
+ .rodata.font8x8
+                0x801ef928      0x2d8 src/font.o
+                0x801ef928                font8x8
+ .rodata.game_id_send.str1.4
+                0x801efc00      0x11c src/game_id.o
+ .rodata.expected.0
+                0x801efc00        0x8 src/game_id.o
+ .rodata.get_psx_exe_gameid.str1.4
+                0x801efc08      0xd08 src/gameid_psx_exe.o
+ .rodata.re_cd_init.str1.4
+                0x801efc08       0x38 src/loader.o
+ .rodata.loader_init_drive.str1.4
+                0x801efc08      0x130 src/loader.o
+ .rodata.loader_boot_disc.str1.4
+                0x801efc08      0x288 src/loader.o
+ .rodata.str1.4
+                0x801efc08        0x8 src/loader.o
+ .rodata.main.str1.4
+                0x801efc08       0x34 src/main.o
+ .rodata.draw_header.str1.4
+                0x801efc08       0x3c src/screen.o
+ *(.rodata1)
+
+.data           0x801efc08        0x9
+ *(.data .data.*)
+ .data.p5_localized
+                0x801efc08        0x4 src/loader.o
+ .data.region_name
+                0x801efc0c        0x4 src/loader.o
+ .data.enable_unlock
+                0x801efc10        0x1 src/loader.o
+ *(.sdata .sdata.*)
+                0x801efc14                        . = ALIGN (0x4)
+                0x801efc14                        PROVIDE (__bss_start = .)
+
+.bss            0x801efc14     0xf41c
+ *(.sbss .sbss.*)
+ *(.bss .bss.*)
+ .bss.original_disc_error
+                0x801efc14        0x4 src/bios.o
+                0x801efc14                original_disc_error
+ .bss.is_scps   0x801efc18        0x1 src/gameid_psx_exe.o
+                0x801efc18                is_scps
+ .bss.calibrate_laser
+                0x801efc19        0x1 src/loader.o
+ .bss.bugged_setsession
+                0x801efc1a        0x1 src/loader.o
+ *fill*         0x801efc1b        0x1 
+ .bss.big_tex.0
+                0x801efc1c     0xc000 src/screen.o
+ .bss.small_tex.1
+                0x801fbc1c     0x3000 src/screen.o
+ .bss.is_pal    0x801fec1c        0x1 src/screen.o
+ *fill*         0x801fec1d        0x3 
+ .bss.line_count
+                0x801fec20        0x4 src/screen.o
+ .bss.text_buffer
+                0x801fec24      0x40c src/screen.o
+ *(COMMON)
+                0x801ff030                        . = ALIGN (0x4)
+                0x801ff030                        PROVIDE (__bss_end = .)
+                0x801ffef0                        PROVIDE (__sp_top = ((ORIGIN (ram) + LENGTH (ram)) - 0x10))
+
+/DISCARD/
+ *(.comment)
+ *(.mdebug*)
+ *(.reginfo)
+ *(.MIPS.abiflags)
+ *(.pdr)
+ *(.gnu.attributes)
+LOAD src/audio.o
+LOAD src/bios.o
+LOAD src/cdrom.o
+LOAD src/cfgparse.o
+LOAD src/compiler_rt.o
+LOAD src/font.o
+LOAD src/game_id.o
+LOAD src/gameid_psx_exe.o
+LOAD src/gpu.o
+LOAD src/loader.o
+LOAD src/main.o
+LOAD src/screen.o
+LOAD src/str.o
+LOAD src/util.o
+LOAD src/bioscalls.o
+LOAD src/memcardpro.o
+LOAD src/start.o
+LOAD /usr/lib/gcc-cross/mipsel-linux-gnu/12/libgcc.a
+OUTPUT(cdloader.elf elf32-tradlittlemips)
+
+.note.GNU-stack
+                0x00000000        0x0
+ .note.GNU-stack
+                0x00000000        0x0 src/audio.o
+ .note.GNU-stack
+                0x00000000        0x0 src/bios.o
+ .note.GNU-stack
+                0x00000000        0x0 src/cdrom.o
+ .note.GNU-stack
+                0x00000000        0x0 src/cfgparse.o
+ .note.GNU-stack
+                0x00000000        0x0 src/font.o
+ .note.GNU-stack
+                0x00000000        0x0 src/game_id.o
+ .note.GNU-stack
+                0x00000000        0x0 src/gameid_psx_exe.o
+ .note.GNU-stack
+                0x00000000        0x0 src/gpu.o
+ .note.GNU-stack
+                0x00000000        0x0 src/loader.o
+ .note.GNU-stack
+                0x00000000        0x0 src/main.o
+ .note.GNU-stack
+                0x00000000        0x0 src/screen.o
+ .note.GNU-stack
+                0x00000000        0x0 src/str.o

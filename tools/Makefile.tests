@@ -1,0 +1,24 @@
+# Host-side tests for the two-stage launcher's planner. Builds the
+# dashboard's own src/main/app_launch.c with the host compiler; no MIPS
+# toolchain and no console required.
+#
+#   make -C tools -f Makefile.tests
+
+CC     ?= cc
+CFLAGS := -std=c11 -O1 -g -Wall -Wextra -I../src \
+          -DAPP_LAUNCH_HOST_TEST -fsanitize=address,undefined
+LDFLAGS := -fsanitize=address,undefined
+
+.PHONY: all clean
+
+all: build/test_app_launch
+	@./build/test_app_launch
+
+build:
+	@mkdir -p build
+
+build/test_app_launch: test_app_launch.c ../src/main/app_launch.c | build
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+clean:
+	rm -rf build
