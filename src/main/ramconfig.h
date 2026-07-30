@@ -1,0 +1,45 @@
+/*
+ * ps1-ram-tester - (C) 2026 spicyjpeg
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+ * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <stddef.h>
+#include "main/renderer.h"
+#include "main/ui.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+size_t getMainRAMSize(void);
+void fixRetailRAMConfig(void);
+
+// Skip the next fixRetailRAMConfig() call. Used after the user explicitly
+// applies a main RAM configuration, so the retail-BIOS correction doesn't
+// immediately overwrite their choice.
+void suppressRetailRAMFixOnce(void);
+
+// True if `menu` is this submenu's own item list. Same purpose as
+// isRAMTesterMenu() in ramtester.h - see isHeavyBackgroundUnsafe() in ui.c.
+bool isRAMConfigMenu(const MenuItem *menu);
+
+void enterRAMConfigMenu(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+);
+
+#ifdef __cplusplus
+}
+#endif
