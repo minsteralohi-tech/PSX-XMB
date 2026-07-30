@@ -91,7 +91,7 @@ addPS1Executable(
 	src/main/bios_calls.s
 	src/main/hud.c
 	src/main/badge.c
-	src/main/sio_launch.c
+	src/main/launch_ui.c
 	src/main/app_launch.c
 	src/main/app_stub.s
 	src/main/music_settings.c

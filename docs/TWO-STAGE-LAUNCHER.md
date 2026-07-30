@@ -189,6 +189,34 @@ bet with no upside. It now preloads the PC, GP and SP into `$s0`/`$s1`/`$s2`
 before the call and touches no memory after it, exactly like the trampoline in
 the standalone SIO loader that is already proven on this console.
 
+## Testing a launch on hardware without rebuilding
+
+Both Settings -> SIO Loader and Tools -> UniROM 8.0 now show the same
+confirmation screen, driven by `planEmbeddedApp()`:
+
+```
+Target   801D0000 - 801F1000  (135168 bytes)
+Arena    801FF000      Entry 801D0000
+Dash end 801C4A70      Live  801A0FF0
+Path     Stage 1 trampoline
+Erase RAM  YES - wipe the dashboard first
+```
+
+**Triangle toggles the RAM erase and re-plans.** That also switches `Path`
+between the trampoline and the direct copy, so all the combinations can be
+tried on a real console without another build:
+
+| Erase RAM | Path | What it exercises |
+|---|---|---|
+| no | direct | The handoff Fast Boot and UniROM have always used |
+| yes | stage 1 | Trampoline, RAM wipe, memfill |
+
+Defaults: SIO loader **no** (proven working), UniROM **yes**.
+
+If a launch black-screens, note the four addresses and which `Path` was shown
+before pressing X — that narrows it to one of two code paths instead of the
+whole handoff.
+
 ## Not yet verified
 
 The planner logic is tested on the host. Stage 1 itself, the erase path and
