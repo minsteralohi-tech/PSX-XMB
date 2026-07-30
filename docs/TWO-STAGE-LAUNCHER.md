@@ -65,6 +65,40 @@ stage 2   target      the launched program
 
 Nothing returns to C once stage 1 starts.
 
+## Stage 1 is used only when it is actually needed
+
+**This is the fix for the black screen / frozen warning screen.**
+
+Copying the payload straight from C and jumping — `handoff.c`'s
+`launchPSEXEImage()` — is safe whenever the destination and the memfill are
+clear of the code doing the copying and of its stack. That is true for the
+standalone SIO loader (`0x801b0000`) and for UniROM (`0x801d0000`), and it is
+the **only handoff on this console with a track record of working**: Fast Boot
+and Tools → UniROM 8.0 both use it.
+
+The trampoline path is the one that has never worked here — the original
+dashboard SIO loader transferred perfectly and then died in
+`launchStagedPSEXE()`, whose stub ran from `0x8000c800`.
+
+The first version of this launcher put *everything* through a trampoline,
+including the SIO loader, which did not need one. Worse, its arena rule
+required the arena to sit above `_imageEnd`. With this dashboard's `.bss`,
+`_imageEnd` is high enough that every main-RAM candidate was rejected and the
+choice fell through to `0x8000c000` — BIOS kernel scratch, i.e. the exact
+configuration that has never worked.
+
+So the planner now decides:
+
+| Case | Path |
+|---|---|
+| destination and memfill clear the dashboard's `.text` and stack | **direct** — no trampoline, no arena |
+| they do not, or RAM is being erased | **stage 1** |
+
+For the SIO loader this selects **direct**, and the confirmation screen says
+so. "Live" means `.text` plus the current stack — not `_imageEnd`. Once
+`quiesceForHandoff()` has run, `.bss`, the heap and everything above the stack
+is dead, because nothing reads it again.
+
 ## Picking the arena
 
 There is no single address that is free for every target, which is what made
@@ -145,6 +179,15 @@ BIOS does after a `LoadExec`.
 
 If the planner refuses, it says why rather than jumping — `appPlanResultText()`
 gives the reason, and the SIO Loader screen already displays it.
+
+## Also fixed: a register bug in stage 1
+
+The stub kept the parameter-block pointer in `$s7` across the BIOS
+`FlushCache` call and reloaded the entry point through it afterwards. That
+only works if the BIOS honours the o32 ABI for every callee-saved register — a
+bet with no upside. It now preloads the PC, GP and SP into `$s0`/`$s1`/`$s2`
+before the call and touches no memory after it, exactly like the trampoline in
+the standalone SIO loader that is already proven on this console.
 
 ## Not yet verified
 

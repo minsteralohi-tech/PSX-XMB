@@ -14,6 +14,8 @@
 #include "main/app_launch.h"
 
 extern uint32_t appTestImageEnd;
+extern uint32_t appTestTextEnd;
+extern uint32_t appTestStack;
 
 static int failures;
 static int checks;
@@ -79,8 +81,11 @@ static void testStandaloneSIOLoader(void) {
 	CHECK(plan.entry == 0x801b0000);
 	CHECK(plan.sp == 0x801bdff0);
 
-	/* Top of RAM is clear of both the loader and its BSS, so it wins. */
-	CHECK(plan.arena == 0x801ff000);
+	/* The loader lands above the dashboard's .text and stack, so no
+	 * trampoline is needed at all - this takes the same direct copy-and-jump
+	 * that Fast Boot and UniROM already use successfully on hardware. */
+	CHECK(plan.useStage1 == 0);
+	CHECK(plan.arena == 0);
 
 	/* Without eraseRam the only fill is the PS-EXE memfill, rounded up to a
 	 * whole number of words. */
@@ -97,10 +102,10 @@ static void testUniROM(void) {
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
 
-	/* UniROM ends at 0x801f1000, so the top-of-RAM arena is still clear.
-	 * Its stack starts at 0x801fff00 and grows down through the arena, but
-	 * stage 1 has jumped long before UniROM pushes anything. */
-	CHECK(plan.arena == 0x801ff000);
+	/* Same as the SIO loader: comfortably above the live region, so the
+	 * direct path applies - which is exactly what the shipping UniROM menu
+	 * entry already does. */
+	CHECK(plan.useStage1 == 0);
 	CHECK(plan.destEnd == 0x801f1000);
 	CHECK(plan.fillCount == 0);
 }
@@ -113,23 +118,25 @@ static void testCDLoader(void) {
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
 
-	/* The top-of-RAM candidate is inside this target, so the planner must
-	 * fall back rather than install stage 1 into the payload. */
-	CHECK(plan.arena == 0x801e0000);
-	CHECK(plan.arena + APP_ARENA_SIZE <= plan.dest);
+	CHECK(plan.useStage1 == 0);
 
 	/* spBase == 0 in the header means the BIOS default. */
 	CHECK(plan.sp == 0x801fff00);
 }
 
 static void testOrdinaryHomebrew(void) {
-	printf("ordinary homebrew at 0x80010000\n");
+	printf("ordinary homebrew at 0x80010000 (lands on the dashboard)\n");
 
 	makeExe(0x80010000, 0x80010000, 0x40000, 0x80050000, 0x1000, 0);
 
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	/* This one really does overwrite the copier and its stack, so it is the
+	 * case stage 1 exists for. */
+	CHECK(plan.useStage1 == 1);
 	CHECK(plan.arena == 0x801ff000);
+	CHECK(plan.arena >= plan.liveEnd);
 }
 
 static void testArenaAvoidsSourceBlob(void) {
@@ -154,21 +161,24 @@ static void testArenaClearsDashboardImage(void) {
 
 	makeExe(0x80010000, 0x80010000, 0x1000, 0, 0, 0);
 
-	/* A much fatter dashboard build must push the arena upward rather than
-	 * install stage 1 over a global the dashboard is still reading. */
-	appTestImageEnd = 0x801d0000;
-
 	AppLaunchPlan plan;
+
+	/*
+	 * A huge .bss must NOT push the arena away: only .text and the live
+	 * stack matter once quiesce has run. Getting this wrong is what forced
+	 * the fallback into BIOS kernel scratch - the one arrangement that has
+	 * never worked on this console.
+	 */
+	appTestImageEnd = 0x801f8000;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
-	CHECK(plan.arena >= 0x801d0000 || plan.arena < APP_RAM_BASE);
 	CHECK(plan.arena == 0x801ff000);
 
-	/* And if the dashboard somehow filled main RAM entirely, the only
-	 * remaining home is BIOS kernel scratch. */
-	appTestImageEnd = 0x801ffff0;
+	/* But the stack really does move it. */
+	appTestStack = 0x801fe000;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
 	CHECK(plan.arena == 0x8000c000);
 
+	appTestStack = 0x8019e0c8;
 	appTestImageEnd = 0x801a6000;
 }
 
@@ -179,6 +189,10 @@ static void testEraseRamFills(void) {
 
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 1, &plan), APP_PLAN_OK);
+
+	/* Erasing RAM always needs stage 1: the code doing the erasing would
+	 * otherwise be its own first casualty. */
+	CHECK(plan.useStage1 == 1);
 
 	/* Everything below the loader, everything above it, split around the
 	 * arena, plus the BSS memfill. */
@@ -265,9 +279,11 @@ static void testBssPushesArenaAside(void) {
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
 
-	CHECK(plan.arena != 0x801ff000);
-	CHECK(plan.arena + APP_ARENA_SIZE <= 0x801f0000 ||
-	      plan.arena < APP_RAM_BASE);
+	if (plan.useStage1) {
+		CHECK(plan.arena != 0x801ff000);
+		CHECK(plan.arena + APP_ARENA_SIZE <= 0x801f0000 ||
+		      plan.arena < APP_RAM_BASE);
+	}
 }
 
 static void testPhysicalAddressesAreCanonicalised(void) {
