@@ -2,7 +2,7 @@
  * PSX-iTests - shared "hand the machine over" helpers
  *
  * Every path that chain-loads another program (Fast Boot's cdloader.exe,
- * Tools -> UniROM 8.0, and the SIO Loader's received EXE) needs the same
+ * Tools -> UniROM 8.0, and Settings -> SIO Loader) needs the same
  * thing first: put the hardware back into a state a freshly-started PS-EXE
  * can cope with. This module is that step, in one place.
  *
@@ -35,12 +35,14 @@
  * With channel 2 still latched busy, that bit may never come back and UniROM
  * can spin there forever. Stopping each CHCR closes that hardware-state gap.
  *
- * The SIO receiver deliberately remains in the dashboard until its complete
- * transfer has been acknowledged, so its BIOS TTY pointers are still valid
- * while it is receiving. The final staged trampoline then takes over from
- * low scratch RAM. The handoff deliberately does not reconstruct BIOS tables
- * or traverse inherited device callbacks; that experimental path broke both
- * serial launch and Fast Boot. It also does NOT zero DMA_DPCR: stopping each
+ * The dashboard-resident SIO receiver that used to live here is gone. Serial
+ * loading is now a standalone PS-EXE launched through app_launch.c's
+ * two-stage handoff, so nothing in this file needs to survive its own
+ * payload any more. quiesceForHandoff() is still shared by every path.
+ *
+ * The handoff deliberately does not reconstruct BIOS tables or traverse
+ * inherited device callbacks; that experimental path broke both serial
+ * launch and Fast Boot. It also does NOT zero DMA_DPCR: stopping each
  * channel through CHCR is safer and closer to BIOS launch state.
  */
 
@@ -94,18 +96,6 @@ typedef struct {
 } PSEXEHeader;
 
 #define PSEXE_PAYLOAD_OFFSET 0x800
-
-/*
- * Launch a PS-EXE whose header and payload were received into separate RAM
- * buffers. Serial reception stays in the known-good dashboard code; the
- * stable scratch trampoline performs the final overlap-safe copy and jump
- * only after the transfer completes.
- */
-__attribute__((noreturn)) void launchStagedPSEXE(
-	const PSEXEHeader *header,
-	const uint8_t *payload,
-	uint32_t payloadSize
-);
 
 #ifdef __cplusplus
 }

@@ -8,7 +8,7 @@
 #include "common/gpu.h"
 #include "common/sio0.h"
 #include "main/badge.h"
-#include "main/sio_loader.h"
+#include "main/sio_launch.h"
 #include "main/music_settings.h"
 #include "main/cd_player.h"
 #include "main/console_info.h"

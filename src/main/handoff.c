@@ -15,11 +15,6 @@
 // under a millisecond, so this only exists so a channel that is already
 // wedged can never hang the hand-off itself.
 #define DMA_DRAIN_TIMEOUT 0x100000u
-#define STAGED_TRAMPOLINE_ADDR   0x8000c800u
-#define STAGED_TRAMPOLINE_PARAMS 0x8000c7c0u
-
-extern const uint32_t sioStagedStubStart[];
-extern const uint32_t sioStagedStubEnd[];
 
 void quiesceForHandoff(void) {
 	// 1. Silence the SPU. UniROM never touches the SPU at all (there is not
@@ -137,53 +132,4 @@ __attribute__((noreturn)) void launchPSEXEImage(const uint8_t *exe) {
 	}
 
 	jumpToLoadedEXE(entry, gp, sp);
-}
-
-__attribute__((noreturn)) void launchStagedPSEXE(
-	const PSEXEHeader *hdr,
-	const uint8_t *payload,
-	uint32_t payloadSize
-) {
-	uint32_t entry = hdr->pc;
-	uint32_t gp = hdr->gp;
-	uint32_t sp = hdr->spBase ? (hdr->spBase + hdr->spOffset) : 0x801ff000;
-	uint32_t dst = hdr->textAddr;
-	uint32_t words = (payloadSize + 3) / 4;
-
-	/*
-	 * Keep the stable receiver's transfer path separate from this final
-	 * handoff. The position-independent trampoline is copied before its
-	 * source or the dashboard can be overwritten, then performs a true
-	 * memmove-style copy in either direction and a direct PC/GP/SP jump.
-	 */
-	quiesceForHandoff();
-
-	volatile uint32_t *code =
-		(volatile uint32_t *) STAGED_TRAMPOLINE_ADDR;
-	size_t codeWords = (size_t) (sioStagedStubEnd - sioStagedStubStart);
-	for (size_t i = 0; i < codeWords; i++)
-		code[i] = sioStagedStubStart[i];
-
-	volatile uint32_t *params =
-		(volatile uint32_t *) STAGED_TRAMPOLINE_PARAMS;
-	params[0] = dst;
-	params[1] = (uint32_t) payload;
-	params[2] = words;
-	params[3] = entry;
-	params[4] = gp;
-	params[5] = sp;
-
-	flushCache();
-
-	__asm__ volatile(
-		"lui  $t9, 0x8000\n"
-		"ori  $t9, $t9, 0xc800\n"
-		"jr   $t9\n"
-		"nop\n"
-		:
-		:
-		: "$t9", "memory"
-	);
-
-	__builtin_unreachable();
 }
