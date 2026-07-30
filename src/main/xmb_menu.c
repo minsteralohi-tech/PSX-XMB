@@ -8,7 +8,7 @@
 #include "common/gpu.h"
 #include "common/sio0.h"
 #include "main/badge.h"
-#include "main/sio_launch.h"
+#include "main/launch_ui.h"
 #include "main/music_settings.h"
 #include "main/cd_player.h"
 #include "main/console_info.h"
@@ -59,56 +59,6 @@ typedef struct {
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item);
-
-static int confirmUniROMHandoff(
-	RenderContext *ctx,
-	UIState       *state,
-	const MenuItem *item
-) {
-	while (pollController(0) | pollController(1))
-		;
-
-	for (;;) {
-		uint16_t buttons = pollController(0) | pollController(1);
-
-		if (buttons & PAD_BTN_CIRCLE) {
-			playCancelSound();
-			while (pollController(0) | pollController(1))
-				;
-			enterMainMenu(ctx, state, item);
-			return 0;
-		}
-		if (buttons & PAD_BTN_CROSS)
-			break;
-
-		beginFrame(ctx);
-		drawXMBBackground(ctx);
-
-		printString(ctx, 16, 30, 0xffffff, "UNIROM 8.0");
-		printString(ctx, 16, 58, 0xffffff,
-			"This will leave the PSX-iTests dashboard.");
-		printString(ctx, 16, 74, 0xffffff,
-			"UniROM will be copied to RAM and started.");
-		printString(ctx, 16, 90, 0xffffff,
-			"The dashboard will be cleared before launch.");
-
-		printString(ctx, 16, 122, 0x808080, "Important");
-		printString(ctx, 16, 138, 0xffffff,
-			"Use the reset/power-cycle to return to this dashboard.");
-		printString(ctx, 16, 154, 0xffffff,
-			"This option is for the embedded UniROM image.");
-
-		printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
-			CH_PS1_CROSS_BUTTON " Enter    "
-			CH_PS1_CIRCLE_BUTTON " Back");
-
-		endFrame(ctx);
-	}
-
-	while (pollController(0) | pollController(1))
-		;
-	return 1;
-}
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
@@ -239,8 +189,10 @@ static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item
 /* UniROM 8.0: chain-load the embedded real UniROM build (see
  * unirom_launch.c). Never returns. */
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item) {
-	if (confirmUniROMHandoff(ctx, state, item))
-		launchUniROM();
+	// The confirmation screen, the plan validation and the handoff all live
+	// in launch_ui.c now, shared with Settings -> SIO Loader, so the two
+	// cannot drift apart. Returns if the user backs out.
+	runUniROMLauncher(ctx, state, item);
 }
 
 /* For consoles that boot into this app THROUGH a real, physically-installed
