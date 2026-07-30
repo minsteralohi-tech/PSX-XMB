@@ -82,6 +82,20 @@ void quiesceForFirmwareReset(void);
  */
 __attribute__((noreturn)) void launchPSEXEImage(const uint8_t *exe);
 
+/*
+ * Flush the instruction cache, then set $gp/$sp and jump to a program that
+ * has already been copied into place. Never returns.
+ *
+ * Defined in handoff.c and used by launchPSEXEImage() there and by
+ * app_launch.c's direct handoff, so it has to be declared here - it was
+ * previously only ever called within handoff.c and so had no prototype.
+ */
+__attribute__((noreturn)) void jumpToLoadedEXE(
+	uint32_t pc,
+	uint32_t gp,
+	uint32_t sp
+);
+
 /* Standard PS-EXE header: the first 2048 bytes of any .exe file. */
 typedef struct {
 	char     magic[8];      // "PS-X EXE"

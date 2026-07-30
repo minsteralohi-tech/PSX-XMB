@@ -300,8 +300,6 @@ const char *appPlanResultText(AppPlanResult result) {
 	return "unknown";
 }
 
-#ifndef APP_LAUNCH_HOST_TEST
-
 /*
  * Direct handoff: copy from C, then jump. This is byte-for-byte the shape of
  * handoff.c's launchPSEXEImage(), which is the path Fast Boot and Tools ->
@@ -414,6 +412,7 @@ __attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan)
 	 * $t9. It reads no absolute addresses, so the arena choice above is the
 	 * only thing that decides where it runs.
 	 */
+#ifndef APP_LAUNCH_HOST_TEST
 	__asm__ volatile(
 		".set push\n"
 		".set noreorder\n"
@@ -426,6 +425,10 @@ __attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan)
 		: "r"(params), "r"(code)
 		: "$t8", "$t9", "memory"
 	);
+#else
+	(void) params;
+	(void) code;
+#endif
 
 	__builtin_unreachable();
 }
@@ -446,5 +449,3 @@ __attribute__((noreturn)) void runAppLaunch(const AppLaunchPlan *plan) {
 
 	runDirectLaunch(plan);
 }
-
-#endif /* !APP_LAUNCH_HOST_TEST */
