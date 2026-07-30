@@ -1,0 +1,49 @@
+{
+	"isoLevel": 1,
+	"xa":       true,
+
+	"identifiers": {
+		"system":       "PLAYSTATION",
+		"volume":       "${CD_VOLUME_NAME}",
+		"volumeSet":    "${CD_VOLUME_NAME}",
+		"publisher":    "SPICYJPEG",
+		"dataPreparer": "GCC ${CMAKE_CXX_COMPILER_VERSION}, CMAKE ${CMAKE_VERSION}, PYTHON ${Python3_VERSION}",
+		"application":  "PLAYSTATION",
+		"copyright":    "README.TXT;1"
+	},
+
+	"systemArea": {
+		"region": "          Licensed  by          Sony Computer Entertainment Inc.",
+		"logo":   "${PROJECT_SOURCE_DIR}/assets/cdlogo.tmd"
+	},
+
+	"entries": [
+		{
+			"type":   "file",
+			"name":   "SYSTEM.CNF",
+			"source": "${PROJECT_BINARY_DIR}/system.cnf"
+		},
+		{
+			"type":   "file",
+			"name":   "README.TXT",
+			"source": "${PROJECT_BINARY_DIR}/readme.txt"
+		},
+		{
+			"type":   "file",
+			"name":   "LICENSE.TXT",
+			"source": "${PROJECT_BINARY_DIR}/license.txt"
+		},
+
+		{
+			"type":   "file",
+			"name":   "PSX.EXE",
+			"source": "${PROJECT_BINARY_DIR}/${RELEASE_NAME}.psexe"
+		},
+
+		{
+			"type": "empty",
+			"name": "PADDING.BIN",
+			"size": 5242880
+		}
+	]
+}

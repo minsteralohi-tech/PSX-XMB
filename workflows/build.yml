@@ -1,0 +1,172 @@
+# The GCC toolchain is stored in the GitHub Actions cache after being built. To
+# minimize build times, the toolchain build step is skipped if there is a cached
+# copy of the toolchain that has not expired.
+
+name: Build
+on:   [ push, pull_request ]
+
+jobs:
+  build:
+    name:    Run build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    # The cache key includes a hash of the toolchain build script, so the
+    # toolchain is rebuilt only when that script actually changes. The
+    # restore-keys fallback means an unrelated edit to the script still
+    # reuses the previous toolchain instead of forcing a 30-minute rebuild.
+    #
+    # NOTE: GitHub scopes caches per branch - a cache saved on a feature
+    # branch is NOT visible to other branches, only caches from the default
+    # branch are inherited. If the toolchain keeps rebuilding, make sure at
+    # least one run has completed successfully on the default branch.
+    - name: Initialize toolchain cache
+      id:   cache
+      uses: actions/cache@v5
+      with:
+        # Stable, literal key. It deliberately does NOT use hashFiles():
+        # this step runs BEFORE actions/checkout below, so at this point the
+        # workspace is still empty and hashFiles() can only ever return an
+        # empty string - which silently produced the cache literally named
+        # "toolchain-" visible in the repo's cache list. (Even after
+        # checkout the script lives under PSX-iTests/, not the workspace
+        # root, so the pattern would still never match.)
+        #
+        # The "-v2" suffix is a one-time key bump: the older exact-match cache
+        # ("toolchain-mipsel-none-elf") was smaller than the "toolchain" cache,
+        # which suggests it may be incomplete. An incomplete EXACT hit is the
+        # worst case - actions/cache won't fall back to restore-keys on an
+        # exact match, and won't re-save because the key already exists, so the
+        # binary guard below would fail and rebuild GCC on EVERY run forever.
+        # Bumping the key forces this run to restore the good toolchain via the
+        # restore-keys fallback (or, once, rebuild) and then save a fresh,
+        # known-good cache under the new key that subsequent runs hit exactly.
+        key: toolchain-mipsel-none-elf-v2
+        # Fall back to any earlier toolchain cache rather than rebuilding.
+        restore-keys: |
+          toolchain-mipsel-none-elf
+          toolchain-
+          toolchain
+        path: gcc-mipsel-none-elf
+
+    - name: Fetch repo contents
+      uses: actions/checkout@v6
+      with:
+        path: PSX-iTests
+
+    - name: Fix script permissions
+      run: |
+        chmod +x PSX-iTests/.github/scripts/*.sh
+
+    - name: Install prerequisites
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y --no-install-recommends ninja-build mame-tools
+
+    - name: Download mkpsxiso
+      run: |
+        python3 -c "
+        import json, urllib.request
+        req = urllib.request.Request(
+            'https://api.github.com/repos/Lameguy64/mkpsxiso/releases/latest',
+            headers={'User-Agent': 'psx-itests-ci'}
+        )
+        with urllib.request.urlopen(req) as r:
+            data = json.load(r)
+        url = None
+        for asset in data['assets']:
+            name = asset['name'].lower()
+            if ('ubuntu' in name or 'linux' in name) and not name.endswith('.sha256'):
+                url = asset['browser_download_url']
+                break
+        if not url:
+            raise SystemExit('No Linux mkpsxiso release asset found')
+        print('Downloading:', url)
+        urllib.request.urlretrieve(url, 'mkpsxiso-package')
+        "
+        echo "--- Downloaded package info ---"
+        file mkpsxiso-package
+        mkdir -p mkpsxiso-bin
+        if file mkpsxiso-package | grep -qi "Debian binary package"; then
+          echo "Detected a .deb package - extracting with dpkg -x"
+          dpkg -x mkpsxiso-package mkpsxiso-bin
+        elif unzip -o mkpsxiso-package -d mkpsxiso-bin; then
+          echo "Detected a zip archive"
+        else
+          echo "Falling back to tar"
+          tar -xf mkpsxiso-package -C mkpsxiso-bin
+        fi
+        echo "--- Extracted contents ---"
+        find mkpsxiso-bin -type f
+        MKPSXISO_BIN="$(find mkpsxiso-bin -type f -iname 'mkpsxiso' | head -n 1)"
+        if [ -z "$MKPSXISO_BIN" ]; then
+          echo "Could not locate an 'mkpsxiso' binary in the downloaded package" >&2
+          exit 1
+        fi
+        echo "Found: $MKPSXISO_BIN"
+        chmod +x "$MKPSXISO_BIN"
+        sudo cp "$MKPSXISO_BIN" /usr/local/bin/mkpsxiso
+        sudo chmod +x /usr/local/bin/mkpsxiso
+        echo "--- Verifying installation ---"
+        which mkpsxiso
+        mkpsxiso --version || mkpsxiso -h || true
+
+    - name: Set up Python virtual environment
+      run: |
+        python3 -m venv PSX-iTests/env
+        source PSX-iTests/env/bin/activate
+        pip3 install -r PSX-iTests/tools/requirements.txt
+
+    # Guard on the compiler actually being present rather than on
+    # steps.cache.outputs.cache-hit. That output is only 'true' for an EXACT
+    # key match - when the cache is restored via restore-keys it stays
+    # 'false', so the old condition rebuilt GCC from scratch even though a
+    # perfectly good toolchain had just been unpacked into the workspace.
+    #
+    # The build itself only runs on a cache miss, which should be rare (once
+    # per toolchain version bump) - but when it does run, a transient GNU
+    # mirror hiccup (502s, timeouts) used to fail the whole job outright.
+    # buildToolchain.sh now retries each download and fails over to a second
+    # mirror on its own; the outer 2-attempt loop here is a second safety
+    # net in case a whole CI run lands in a bad window for every mirror.
+    - name: Build GCC toolchain
+      run: |
+        if [ -x gcc-mipsel-none-elf/bin/mipsel-none-elf-gcc ]; then
+          echo "Toolchain restored from cache - skipping build."
+          gcc-mipsel-none-elf/bin/mipsel-none-elf-gcc --version | head -1
+        else
+          echo "No cached toolchain found - building from source."
+          for attempt in 1 2; do
+            if bash PSX-iTests/.github/scripts/buildToolchain.sh gcc-mipsel-none-elf mipsel-none-elf; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Toolchain build failed twice - giving up." >&2
+              exit 1
+            fi
+            echo "Toolchain build failed, cleaning up and trying once more..."
+            rm -rf gcc-mipsel-none-elf binutils-* gcc-1* binutils-build gcc-build
+            sleep 30
+          done
+        fi
+
+    - name: Build project
+      run: |
+        bash PSX-iTests/.github/scripts/buildRelease.sh
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name:              build
+        if-no-files-found: error
+        path:              PSX-iTests-*.zip
+
+    - name: Publish release
+      if:   ${{ github.ref_type == 'tag' }}
+      uses: softprops/action-gh-release@v3
+      with:
+        fail_on_unmatched_files: true
+        files:                   PSX-iTests-*.zip

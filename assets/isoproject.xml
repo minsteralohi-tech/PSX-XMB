@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<iso_project image_name="${RELEASE_NAME}.bin" cue_sheet="${RELEASE_NAME}.cue" system="psx">
+	<track type="data">
+
+		<identifiers
+			system="PLAYSTATION"
+			application="PLAYSTATION"
+			volume="${CD_VOLUME_NAME}"
+			volume_set="${CD_VOLUME_NAME}"
+			publisher="SPICYJPEG"
+			data_preparer="GCC ${CMAKE_CXX_COMPILER_VERSION}, CMAKE ${CMAKE_VERSION}"
+			copyright="README.TXT"
+		/>
+
+		<directory_tree>
+			<file name="SYSTEM.CNF"  type="data" source="system.cnf" />
+			<file name="README.TXT"  type="data" source="readme.txt" />
+			<file name="LICENSE.TXT" type="data" source="license.txt" />
+			<file name="PSX.EXE"     type="data" source="${RELEASE_NAME}.psexe" />
+			<!-- 5 MB padding - some real hardware/drives are unreliable
+			     reading discs that are too small. 5242880 bytes / 2048
+			     bytes per sector = 2560 sectors. -->
+			<dummy sectors="2560" />
+		</directory_tree>
+
+	</track>
+</iso_project>
