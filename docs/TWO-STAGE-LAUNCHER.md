@@ -233,6 +233,72 @@ indices, where a wrong index calls an arbitrary kernel routine. Worth doing
 only once there is evidence that stale kernel state is the actual problem -
 see the UniROM note below.
 
+## Three hand-off styles
+
+| Path | When | What performs the launch |
+|---|---|---|
+| Direct | destination and memfill clear the dashboard's `.text` and stack | `jumpToLoadedEXE()` - copy, flush, set `$gp`/`$sp`, jump |
+| BIOS `Exec()` | asked for, and the direct path applies | BIOS A0(43h) - the kernel sets `$gp`, builds the stack, fills BSS and calls the entry |
+| Stage 1 | payload lands on the copier, or RAM is being erased | position-independent trampoline in the arena |
+
+### Why `Exec()` exists
+
+UniROM starts correctly when the BIOS boots it and black-screens when the
+registers are set by hand - including over serial from the standalone SIO
+loader, which rules out the dashboard entirely. It installs its own kernel
+exception handler and TTY redirect and leans on BIOS services from its first
+instruction; the 240p suite and the SIO loader are bare-metal and do not care.
+
+A PS-EXE header from offset `0x10` onwards *is* the BIOS `EXEC` structure, so
+the whole hand-off is: copy the payload, `FlushCache`, `Exec(header + 0x10)`.
+The kernel then does exactly what it does when booting from disc.
+
+The other half of it is interrupt state. `quiesceForHandoff()` ends by writing
+0 to COP0 SR and masking every interrupt source - correct for a bare-metal
+target that installs its own handlers, fatal for one that waits on a kernel
+event that can then never fire. `quiesceForBIOSExec()` does everything else
+(SPU, DMA CHCR, GPU reset, COP0 breakpoints) but leaves the interrupt mask and
+SR exactly as they are.
+
+`Exec()` cannot be combined with erasing RAM or with stage 1: it runs kernel
+code and returns to the caller on failure, so the dashboard has to still be
+there. `planUseBiosExec()` refuses the combination rather than producing a plan
+that erases its own escape route.
+
+**Square** toggles it on the confirmation screen. UniROM defaults to `Exec()`
+on and erase off; the SIO loader keeps the direct jump that already works.
+
+## Asset budget
+
+The dashboard is ~80% of a 2 MB console, so anything embedded competes with
+what can be launched. Measured contents of the 1,624,064-byte payload:
+
+| Item | Bytes |
+|---|---:|
+| BGM x3 (ps3xmb, ps4xmb, sanctuary) | 970,192 |
+| textures | 179,584 -> 128,992 |
+| code + data | ~174,640 |
+| unirom_bin.exe | 137,216 |
+| SFX x9 | 123,504 |
+| cdloader.exe | 26,624 |
+| sioloader.exe | 8,192 |
+
+The three roaming planet textures (lava, earth, moon) are 4bpp, saving 50,592
+bytes against 8bpp. Their PNGs were requantized to 16 colours with
+Floyd-Steinberg dithering, because `tools/convertImage.py` rejects images over
+the colour limit instead of quantizing them - so re-exporting one of these at
+more than 16 colours will fail the build. The sun stays 8bpp: it is drawn far
+larger and banding shows.
+
+Pure black is deliberately absent from those palettes. The GPU treats a
+`0x0000` texel as transparent, and none of these textures contained black
+before, so introducing it would punch holes in the planets.
+
+Dead files removed (they were in `assets/` but no `addBinaryFile` line ever
+referenced them, so they cost disc space only, never RAM): `bgm.vag`,
+`newbgm.vag`, `bgm3.vag`, `cdloaderold.exe`, `cdlogo.tmd`, `pickup.vag`,
+`dpad.png`, `n00brom.rom`, plus the uncompiled `n00brom_launch.c/.h`.
+
 ## Not yet verified
 
 The planner logic is tested on the host. Stage 1 itself, the erase path and

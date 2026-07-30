@@ -136,15 +136,15 @@ addBinaryFile("${RELEASE_NAME}" sunPaletteData "${PROJECT_BINARY_DIR}/assets/sun
 # Lava, Earth and Moon surface textures for the Nebula 3 theme's textured
 # roaming planets - same 256x128, pre-quantized <=256 colour provenance as
 # assets/sun.png above (see xmb_bg.c's comments on drawTexturedPlanet()).
-convertImage(assets/lava.png 8 assets/lavaTexture.dat assets/lavaPalette.dat)
+convertImage(assets/lava.png 4 assets/lavaTexture.dat assets/lavaPalette.dat)
 addBinaryFile("${RELEASE_NAME}" lavaTextureData "${PROJECT_BINARY_DIR}/assets/lavaTexture.dat")
 addBinaryFile("${RELEASE_NAME}" lavaPaletteData "${PROJECT_BINARY_DIR}/assets/lavaPalette.dat")
 
-convertImage(assets/earth.png 8 assets/earthTexture.dat assets/earthPalette.dat)
+convertImage(assets/earth.png 4 assets/earthTexture.dat assets/earthPalette.dat)
 addBinaryFile("${RELEASE_NAME}" earthTextureData "${PROJECT_BINARY_DIR}/assets/earthTexture.dat")
 addBinaryFile("${RELEASE_NAME}" earthPaletteData "${PROJECT_BINARY_DIR}/assets/earthPalette.dat")
 
-convertImage(assets/moon.png 8 assets/moonTexture.dat assets/moonPalette.dat)
+convertImage(assets/moon.png 4 assets/moonTexture.dat assets/moonPalette.dat)
 addBinaryFile("${RELEASE_NAME}" moonTextureData "${PROJECT_BINARY_DIR}/assets/moonTexture.dat")
 addBinaryFile("${RELEASE_NAME}" moonPaletteData "${PROJECT_BINARY_DIR}/assets/moonPalette.dat")
 

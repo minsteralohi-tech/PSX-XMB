@@ -26,7 +26,16 @@
  * Nothing calls them - the tests only exercise planEmbeddedApp().
  */
 void quiesceForHandoff(void) {}
+void quiesceForBIOSExec(void) {}
 void flushCache(void) {}
+
+int biosExec(const void *execStructure, int argc, void *argv) {
+	(void) execStructure;
+	(void) argc;
+	(void) argv;
+	printf("  FAIL biosExec() reached in a host test\n");
+	exit(1);
+}
 
 __attribute__((noreturn)) void jumpToLoadedEXE(uint32_t pc, uint32_t gp,
                                                uint32_t sp) {
@@ -314,6 +323,40 @@ static void testBssPushesArenaAside(void) {
 	}
 }
 
+static void testBiosExecSelection(void) {
+	printf("BIOS Exec() hand-off selection\n");
+
+	AppLaunchPlan plan;
+
+	/* UniROM: direct path, so Exec() is available. */
+	makeExe(0x801d0000, 0x801d0000, 0x21000, 0, 0, 0x801fff00);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.useStage1 == 0);
+	CHECK(plan.useBiosExec == 0);              /* off unless asked for */
+	CHECK(planUseBiosExec(&plan, 1) == 1);
+	CHECK(plan.useBiosExec == 1);
+	CHECK(planUseBiosExec(&plan, 0) == 1);
+	CHECK(plan.useBiosExec == 0);
+
+	/* Erasing RAM forces stage 1, which Exec() cannot coexist with: it runs
+	 * kernel code and returns into the caller's world on failure, so the
+	 * dashboard has to still be there. The request must be refused rather
+	 * than silently produce a plan that erases its own escape route. */
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 1, &plan), APP_PLAN_OK);
+	CHECK(plan.useStage1 == 1);
+	CHECK(planUseBiosExec(&plan, 1) == 0);
+	CHECK(plan.useBiosExec == 0);
+
+	/* Same for a target that lands on the dashboard and needs relocating. */
+	makeExe(0x80010000, 0x80010000, 0x40000, 0, 0, 0);
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.useStage1 == 1);
+	CHECK(planUseBiosExec(&plan, 1) == 0);
+
+	/* Turning it off is always allowed. */
+	CHECK(planUseBiosExec(&plan, 0) == 1);
+}
+
 static void testPhysicalAddressesAreCanonicalised(void) {
 	printf("KUSEG and KSEG1 header addresses become KSEG0\n");
 
@@ -339,6 +382,7 @@ int main(void) {
 	testEraseRamFills();
 	testRejections();
 	testBssPushesArenaAside();
+	testBiosExecSelection();
 	testPhysicalAddressesAreCanonicalised();
 
 	printf("\n%d checks, %d failures\n", checks, failures);
