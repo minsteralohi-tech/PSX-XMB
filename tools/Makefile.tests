@@ -5,7 +5,14 @@
 #   make -C tools -f Makefile.tests
 
 CC     ?= cc
-CFLAGS := -std=c11 -O1 -g -Wall -Wextra -I../src \
+# The whole of app_launch.c is compiled here, launch paths included, so
+# missing prototypes and type errors surface in seconds instead of ten
+# minutes into a cross build. Only the MIPS inline asm is compiled out.
+#
+# The two -Wno- flags are for the console's 32-bit addresses being cast to
+# pointers on a 64-bit host; they are correct on MIPS and noise here.
+CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -I../src \
+          -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
           -DAPP_LAUNCH_HOST_TEST -fsanitize=address,undefined
 LDFLAGS := -fsanitize=address,undefined
 

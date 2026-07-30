@@ -10,8 +10,36 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "main/app_launch.h"
+
+/*
+ * Host stand-ins for the three console routines the handoff calls. Their only
+ * job is to exist: with them present, the whole of app_launch.c - including
+ * runDirectLaunch() and runStagedLaunch() - is compiled here, so a missing
+ * prototype or a wrong argument type is a test failure rather than something
+ * CI discovers ten minutes into a cross build. (That is exactly how
+ * jumpToLoadedEXE() got through: it was defined in handoff.c but never
+ * declared in handoff.h, and the launch paths were excluded from this build.)
+ *
+ * Nothing calls them - the tests only exercise planEmbeddedApp().
+ */
+void quiesceForHandoff(void) {}
+void flushCache(void) {}
+
+__attribute__((noreturn)) void jumpToLoadedEXE(uint32_t pc, uint32_t gp,
+                                               uint32_t sp) {
+	(void) pc;
+	(void) gp;
+	(void) sp;
+	printf("  FAIL jumpToLoadedEXE() reached in a host test\n");
+	exit(1);
+}
+
+/* Stand-in for the real stage 1 blob from app_stub.s. */
+const uint32_t appStubStart[16];
+const uint32_t appStubEnd[1];
 
 extern uint32_t appTestImageEnd;
 extern uint32_t appTestTextEnd;
