@@ -202,40 +202,36 @@ Path     Stage 1 trampoline
 Erase RAM  YES - wipe the dashboard first
 ```
 
-Two toggles, so a launch can be bisected on real hardware without rebuilding:
-
-| Button | Toggles | Effect |
-|---|---|---|
-| Triangle | Erase RAM | Wipes the dashboard out of RAM first. Also switches `Path` between the trampoline and the direct copy |
-| Square | BIOS | Rebuilds the retail kernel state first, via `bios_reinit.c` |
+**Triangle toggles the RAM erase and re-plans**, which also switches `Path`
+between the trampoline and the direct copy:
 
 | Erase RAM | Path | What it exercises |
 |---|---|---|
 | no | direct | The handoff Fast Boot and UniROM have always used |
 | yes | stage 1 | Trampoline, RAM wipe, memfill |
 
-Defaults: SIO loader **no / no** (proven working, do not disturb),
-UniROM **yes / yes**.
+Defaults: SIO loader **no** (proven working, do not disturb), UniROM **yes**.
 
-### The BIOS toggle
+### About `bios_reinit.c`
 
-`reinitializeBIOSForHandoff()` has been sitting in `bios_reinit.c` unused. It
-is the same warm-boot kernel reconstruction `cdloader.exe` performs, and it
-runs *before* `quiesceForHandoff()` because it makes BIOS calls.
+There is a `reinitializeBIOSForHandoff()` in `src/main/bios_reinit.c` that
+would rebuild the retail kernel state before a handoff - the same warm-boot
+reconstruction `cdloader.exe` performs. It is a plausible fix for a
+BIOS-dependent target such as UniROM, which installs its own kernel exception
+handler and TTY redirect.
 
-The SIO loader does not need it - it makes exactly one BIOS call in its whole
-life, `FlushCache`, and already works without it. UniROM is the opposite: it
-installs its own kernel exception handler and TTY redirect and leans on BIOS
-services throughout, so it is the target most likely to care that this
-dashboard has been driving the memory card, the CD and the TTY beforehand.
+**It is not built and not called.** The file is not in `CMakeLists.txt`, and it
+would not link if it were: it needs ten BIOS call wrappers
+(`biosEnterCriticalSection`, `biosSetConf`, `biosInstallDevices`,
+`biosSetMemSize`, ...) that `bios_calls.s` never defined - that file only
+provides `biosFlushCache`, `biosOpen`, `biosClose`, `biosAddDevice` and
+`biosRemoveDevice`. That is almost certainly why `handoff.h` records the
+kernel-rebuild experiment as having been abandoned.
 
-`handoff.h` notes that an earlier attempt to do this *unconditionally* broke
-Fast Boot and serial loading, which is why it is per-entry and toggleable
-rather than always on.
-
-If a launch black-screens, note the four addresses and which `Path` was shown
-before pressing X — that narrows it to one of two code paths instead of the
-whole handoff.
+Finishing it means writing those wrappers against the correct A0/B0/C0 table
+indices, where a wrong index calls an arbitrary kernel routine. Worth doing
+only once there is evidence that stale kernel state is the actual problem -
+see the UniROM note below.
 
 ## Not yet verified
 
