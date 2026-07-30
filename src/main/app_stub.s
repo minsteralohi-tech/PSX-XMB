@@ -33,6 +33,16 @@
 appStubStart:
 	move    $s7, $t8
 
+	/* Everything still needed after the BIOS call is loaded NOW, into
+	 * callee-saved registers. The proven trampoline in the standalone SIO
+	 * loader does exactly this; an earlier version of this file kept $s7
+	 * live across the FlushCache call and reloaded the entry point through
+	 * it afterwards, which only works if the BIOS honours the o32 ABI for
+	 * every register - a bet with no upside. */
+	lw      $s0, 12($s7)          /* entry PC */
+	lw      $s1, 16($s7)          /* GP       */
+	lw      $s2, 20($s7)          /* SP       */
+
 	/* ---- 1. move the payload into place ---------------------------- */
 	lw      $a0,  0($s7)          /* destination */
 	lw      $a1,  4($s7)          /* source      */
@@ -107,7 +117,7 @@ appFinish:
 	/* Move to the target's stack before calling the BIOS: the dashboard's
 	 * stack is a static buffer inside the image, which the fills above may
 	 * just have zeroed. */
-	lw      $sp, 20($s7)
+	move    $sp, $s2
 
 	/* BIOS A(44h) FlushCache. The payload was written as data, so the
 	 * instruction cache may still hold the dashboard's code for those
@@ -117,10 +127,10 @@ appFinish:
 	jalr    $t2
 	nop
 
-	/* PS-EXE register contract, then straight in. Never returns. */
-	lw      $gp, 16($s7)
-	lw      $t0, 12($s7)
-	jr      $t0
+	/* PS-EXE register contract, then straight in. No memory is touched
+	 * after the BIOS call - only $s0/$s1, which the ABI protects. */
+	move    $gp, $s1
+	jr      $s0
 	nop
 
 appStubEnd:

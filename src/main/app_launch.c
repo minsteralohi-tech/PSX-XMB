@@ -16,12 +16,47 @@
  * Only the planner is built in that mode; the hardware handoff below is not.
  */
 #ifdef APP_LAUNCH_HOST_TEST
-uint32_t appTestImageEnd = 0x801a6000u;
+uint32_t appTestImageEnd  = 0x801a6000u;
+uint32_t appTestTextEnd   = 0x8019c1e0u;
+uint32_t appTestStack     = 0x8019e0c8u;
 #define DASHBOARD_IMAGE_END (appTestImageEnd)
+#define DASHBOARD_TEXT_END  (appTestTextEnd)
+#define CURRENT_SP          (appTestStack)
 #else
 extern uint8_t _imageEnd[];
+extern uint8_t _textEnd[];
 #define DASHBOARD_IMAGE_END ((uint32_t) _imageEnd)
+#define DASHBOARD_TEXT_END  ((uint32_t) _textEnd)
+#define CURRENT_SP          (currentStackPointer())
+
+static uint32_t currentStackPointer(void) {
+	uint32_t sp;
+
+	__asm__ volatile("move %0, $sp" : "=r"(sp));
+	return sp;
+}
 #endif
+
+/*
+ * How much of the dashboard is still in use at handoff time.
+ *
+ * Deliberately NOT _imageEnd. Once quiesceForHandoff() has run, the only
+ * things still being read are the code performing the copy and the stack it
+ * is standing on; .bss, the heap and everything above the stack is dead. On
+ * this build .text ends around 0x8019c1e0 and the stack buffer sits near
+ * 0x8019e0c8, while _imageEnd is much higher - so treating _imageEnd as the
+ * boundary needlessly rules out every arena candidate in main RAM and forces
+ * the fallback into BIOS kernel scratch, which is the one configuration that
+ * has never worked on this console.
+ */
+#define STACK_MARGIN 0x2000u
+
+static uint32_t dashboardLiveEnd(void) {
+	uint32_t textEnd = DASHBOARD_TEXT_END;
+	uint32_t stackEnd = CURRENT_SP + STACK_MARGIN;
+
+	return (stackEnd > textEnd) ? stackEnd : textEnd;
+}
 
 /*
  * Arena candidates, tried in order. All but the last are above the
@@ -169,6 +204,7 @@ AppPlanResult planEmbeddedApp(const uint8_t *exe, int eraseRam,
 
 	uint32_t src      = (uint32_t) (uintptr_t) (exe + PSEXE_PAYLOAD_OFFSET);
 	uint32_t imageEnd = DASHBOARD_IMAGE_END;
+	uint32_t liveEnd  = dashboardLiveEnd();
 
 	plan->entry    = entry;
 	plan->gp       = hdr->gp;
@@ -178,53 +214,66 @@ AppPlanResult planEmbeddedApp(const uint8_t *exe, int eraseRam,
 	plan->bodySize = bodySize;
 	plan->src      = src;
 	plan->imageEnd = imageEnd;
+	plan->liveEnd  = liveEnd;
 
 	/*
-	 * Pick the first arena that clears the destination, the source blob and
-	 * the target's BSS. Candidates inside main RAM must also be at or above
-	 * the dashboard's _imageEnd; the kernel-scratch fallback is below the
-	 * dashboard entirely and so is exempt.
+	 * Does this launch need stage 1 at all?
+	 *
+	 * Only if the copy would land on the code performing it or on its
+	 * stack, or if RAM is being erased out from under that code. Otherwise
+	 * the direct copy-and-jump in handoff.c is both simpler and the only
+	 * handoff with a track record of working on this hardware.
 	 */
-	plan->arena = 0;
+	uint32_t liveSize = liveEnd - APP_RAM_BASE;
 
-	for (unsigned i = 0; i < ARENA_CANDIDATE_COUNT; i++) {
-		uint32_t candidate = ARENA_CANDIDATES[i];
+	plan->useStage1 = eraseRam
+	               || rangesOverlap(dest, bodySize, APP_RAM_BASE, liveSize)
+	               || (bssBytes &&
+	                   rangesOverlap(bssStart, bssBytes, APP_RAM_BASE, liveSize));
 
-		if (candidate >= APP_RAM_BASE && candidate < imageEnd)
-			continue;
-
-		if (rangesOverlap(candidate, APP_ARENA_SIZE, dest, bodySize))
-			continue;
-
-		if (rangesOverlap(candidate, APP_ARENA_SIZE, src, bodySize))
-			continue;
-
-		if (bssBytes &&
-		    rangesOverlap(candidate, APP_ARENA_SIZE, bssStart, bssBytes))
-			continue;
-
-		plan->arena = candidate;
-		break;
-	}
-
-	if (!plan->arena)
-		return APP_PLAN_NO_ARENA;
-
-	/*
-	 * Zero-fill list. Order matters only in that the payload copy happens
-	 * before any of it; stage 1 guarantees that. The destination itself is
-	 * never in the list, and the arena is punched out of every range.
-	 */
 	int ok = 1;
 
-	if (eraseRam) {
-		ok = ok && addFillExcludingArena(plan, APP_RAM_BASE, dest);
-		ok = ok && addFillExcludingArena(plan, destEnd, APP_RAM_TOP);
+	if (plan->useStage1) {
+		/*
+		 * Pick the first arena that clears the destination, the source
+		 * blob and the target's BSS, and that is above whatever the
+		 * dashboard is still using.
+		 */
+		plan->arena = 0;
+
+		for (unsigned i = 0; i < ARENA_CANDIDATE_COUNT; i++) {
+			uint32_t candidate = ARENA_CANDIDATES[i];
+
+			if (candidate >= APP_RAM_BASE && candidate < liveEnd)
+				continue;
+
+			if (rangesOverlap(candidate, APP_ARENA_SIZE, dest, bodySize))
+				continue;
+
+			if (rangesOverlap(candidate, APP_ARENA_SIZE, src, bodySize))
+				continue;
+
+			if (bssBytes &&
+			    rangesOverlap(candidate, APP_ARENA_SIZE, bssStart, bssBytes))
+				continue;
+
+			plan->arena = candidate;
+			break;
+		}
+
+		if (!plan->arena)
+			return APP_PLAN_NO_ARENA;
+
+		if (eraseRam) {
+			ok = ok && addFillExcludingArena(plan, APP_RAM_BASE, dest);
+			ok = ok && addFillExcludingArena(plan, destEnd, APP_RAM_TOP);
+		}
 	}
 
 	/*
-	 * PS-EXE memfill, applied last so it wins over anything above. The
-	 * arena was already proven clear of it, so it goes in as-is.
+	 * PS-EXE memfill, applied last so it wins over the erase above. On the
+	 * direct path this is the only fill, and the check above has already
+	 * proven it cannot reach the dashboard's live region.
 	 */
 	ok = ok && addFill(plan, bssStart, bssBytes);
 
@@ -253,7 +302,56 @@ const char *appPlanResultText(AppPlanResult result) {
 
 #ifndef APP_LAUNCH_HOST_TEST
 
-__attribute__((noreturn)) void runAppLaunch(const AppLaunchPlan *plan) {
+/*
+ * Direct handoff: copy from C, then jump. This is byte-for-byte the shape of
+ * handoff.c's launchPSEXEImage(), which is the path Fast Boot and Tools ->
+ * UniROM 8.0 already use successfully on real hardware. planEmbeddedApp() only
+ * selects it when the destination and the memfill are provably clear of this
+ * code and its stack.
+ */
+__attribute__((noreturn)) static void runDirectLaunch(const AppLaunchPlan *plan) {
+	const uint32_t *src   = (const uint32_t *) plan->src;
+	const uint32_t  dest  = plan->dest;
+	const uint32_t  words = (plan->bodySize + 3u) / 4u;
+	const uint32_t  entry = plan->entry;
+	const uint32_t  gp    = plan->gp;
+	const uint32_t  sp    = plan->sp;
+
+	uint32_t fillStart[APP_MAX_FILLS];
+	uint32_t fillWords[APP_MAX_FILLS];
+	const uint32_t fillCount = plan->fillCount;
+
+	for (uint32_t i = 0; i < fillCount; i++) {
+		fillStart[i] = plan->fillStart[i];
+		fillWords[i] = (plan->fillBytes[i] + 3u) / 4u;
+	}
+
+	quiesceForHandoff();
+
+	volatile uint32_t *d = (volatile uint32_t *) dest;
+
+	/* memmove semantics: the embedded blob is in .rodata and the
+	 * destination is often below it. */
+	if ((const uint32_t *) dest > src) {
+		for (uint32_t i = words; i-- > 0; )
+			d[i] = src[i];
+	} else {
+		for (uint32_t i = 0; i < words; i++)
+			d[i] = src[i];
+	}
+
+	/* PS-EXE memfill, exactly as the BIOS performs it after a LoadExec. */
+	for (uint32_t i = 0; i < fillCount; i++) {
+		volatile uint32_t *f = (volatile uint32_t *) fillStart[i];
+
+		for (uint32_t w = 0; w < fillWords[i]; w++)
+			f[w] = 0;
+	}
+
+	jumpToLoadedEXE(entry, gp, sp);
+}
+
+__attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan) {
 	/* Copy the plan into locals first: everything below runs after the
 	 * hardware has been quiesced, and the plan itself may live in .bss that
 	 * the launched program is about to inherit. */
@@ -340,6 +438,13 @@ AppPlanResult launchEmbeddedApp(const uint8_t *exe, int eraseRam) {
 		return result;
 
 	runAppLaunch(&plan);
+}
+
+__attribute__((noreturn)) void runAppLaunch(const AppLaunchPlan *plan) {
+	if (plan->useStage1)
+		runStagedLaunch(plan);
+
+	runDirectLaunch(plan);
 }
 
 #endif /* !APP_LAUNCH_HOST_TEST */

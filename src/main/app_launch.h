@@ -35,6 +35,29 @@
  *
  * Nothing returns to C after stage 1 starts.
  *
+ * WHEN STAGE 1 IS ACTUALLY NEEDED
+ * -------------------------------
+ * Most of the time it is not, and using it anyway is a bad trade. Copying the
+ * payload straight from C and jumping - handoff.c's launchPSEXEImage(), the
+ * path Fast Boot and Tools -> UniROM 8.0 already use - is safe whenever the
+ * destination and the memfill are clear of the code doing the copying and of
+ * its stack. That is true for the standalone SIO loader (0x801b0000), for
+ * UniROM (0x801d0000) and for anything else that loads above the dashboard's
+ * live region, and it is the only handoff on this console with a track record
+ * of working.
+ *
+ * So the planner picks:
+ *
+ *   direct    the destination and every zero-fill clear the dashboard's
+ *             .text and its stack. No trampoline, no arena.
+ *   stage 1   they do not - the payload lands on the copier, or RAM is being
+ *             erased out from under it - so the copy has to be performed by
+ *             code running somewhere neither side can reach.
+ *
+ * "Live" here means .text plus the current stack, not the whole image: .bss,
+ * the heap and everything else above the stack is expendable the instant
+ * quiesceForHandoff() has run, because nothing reads it again.
+ *
  * PICKING THE ARENA
  * -----------------
  * There is no single address that is free for every target, which is what
@@ -81,11 +104,13 @@ extern "C" {
 #define APP_MAX_FILLS 6
 
 typedef struct {
+	int      useStage1;        /* 0 = direct copy-and-jump from C          */
 	uint32_t entry, gp, sp;
 	uint32_t dest, destEnd, bodySize;
 	uint32_t src;              /* payload inside the dashboard's .rodata  */
 	uint32_t arena;            /* where stage 1 will run                  */
 	uint32_t imageEnd;         /* dashboard's _imageEnd, for display      */
+	uint32_t liveEnd;          /* end of what the dashboard is still using */
 	uint32_t fillCount;
 	uint32_t fillStart[APP_MAX_FILLS];
 	uint32_t fillBytes[APP_MAX_FILLS];

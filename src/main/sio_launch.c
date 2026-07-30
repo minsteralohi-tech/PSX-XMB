@@ -122,17 +122,24 @@ static int confirmSIOLoaderHandoff(
 			(unsigned long) plan->bodySize);
 		printString(ctx, 24, 134, 0xffffff, line);
 
-		snprintf(line, sizeof(line), "Stage 1  %08lX      Entry %08lX",
+		snprintf(line, sizeof(line), "Arena    %08lX      Entry %08lX",
 			(unsigned long) plan->arena,
 			(unsigned long) plan->entry);
 		printString(ctx, 24, 148, 0xffffff, line);
 
-		snprintf(line, sizeof(line), "Dash end %08lX      Stack %08lX",
+		snprintf(line, sizeof(line), "Dash end %08lX      Live  %08lX",
 			(unsigned long) plan->imageEnd,
-			(unsigned long) plan->sp);
+			(unsigned long) plan->liveEnd);
 		printString(ctx, 24, 162, 0xffffff, line);
 
-		printString(ctx, 16, 186, 0x808080,
+		/* Which handoff this will use. "Direct" is the same copy-and-jump
+		 * Fast Boot and UniROM already use; "Stage 1" is the trampoline
+		 * path and names the arena it will run from. */
+		snprintf(line, sizeof(line), "Path     %s",
+			plan->useStage1 ? "Stage 1 trampoline" : "Direct (as UniROM)");
+		printString(ctx, 24, 176, 0x60ff60, line);
+
+		printString(ctx, 16, 198, 0x808080,
 			"Reset or power-cycle to return to the dashboard.");
 
 		printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
