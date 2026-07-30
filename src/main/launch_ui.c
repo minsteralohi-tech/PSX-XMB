@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include "common/sio0.h"
 #include "main/app_launch.h"
+#include "main/bios_reinit.h"
 #include "main/defs.h"
 #include "main/font.h"
 #include "main/launch_ui.h"
@@ -43,6 +44,23 @@ extern const uint8_t uniromExe[];
 
 /* UniROM manages RAM and the kernel itself - see runUniROMLauncher(). */
 #define UNIROM_ERASE_RAM 1
+
+/*
+ * Whether to rebuild the retail BIOS kernel state before handing over, using
+ * bios_reinit.c's warm-boot reconstruction (the same sequence cdloader.exe
+ * uses, and which nothing in this project called until now).
+ *
+ * The standalone SIO loader does not need it - it makes exactly one BIOS call
+ * in its whole life, FlushCache, and it already works without this. UniROM is
+ * the opposite: it installs its own kernel exception handler and TTY redirect
+ * and leans on BIOS services throughout, so it is the target most likely to
+ * care that this dashboard has been using the memory card, the CD and the TTY
+ * for the last ten minutes. handoff.h notes that an earlier attempt to do
+ * this unconditionally broke Fast Boot and serial loading - hence per-entry
+ * defaults and a toggle rather than always-on.
+ */
+#define SIO_LOADER_REINIT_KERNEL 0
+#define UNIROM_REINIT_KERNEL     1
 
 static void waitForRelease(void) {
 	while (pollController(0) | pollController(1))
@@ -99,6 +117,7 @@ static int confirmHandoff(
 	const char     *blurb2,
 	const uint8_t  *exe,
 	int            *eraseRam,
+	int            *reinitKernel,
 	AppLaunchPlan  *plan
 ) {
 	char line[64];
@@ -125,6 +144,12 @@ static int confirmHandoff(
 				*plan = retry;
 			}
 
+			waitForRelease();
+			continue;
+		}
+
+		if (buttons & PAD_BTN_SQUARE) {
+			*reinitKernel = !*reinitKernel;
 			waitForRelease();
 			continue;
 		}
@@ -170,13 +195,19 @@ static int confirmHandoff(
 			          : "no  - leave RAM as it is");
 		printString(ctx, 24, 190, 0x60ff60, line);
 
-		printString(ctx, 16, 212, 0x808080,
+		snprintf(line, sizeof(line), "BIOS       %s",
+			*reinitKernel ? "rebuild kernel state first"
+			              : "leave kernel as it is");
+		printString(ctx, 24, 204, 0x60ff60, line);
+
+		printString(ctx, 16, ctx->screenHeight - 40, 0x808080,
 			"Reset or power-cycle to return to the dashboard.");
 
 		printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
-			CH_PS1_CROSS_BUTTON " Enter    "
-			CH_PS1_CIRCLE_BUTTON " Back    "
-			CH_PS1_TRIANGLE_BUTTON " Erase RAM");
+			CH_PS1_CROSS_BUTTON " Enter  "
+			CH_PS1_CIRCLE_BUTTON " Back  "
+			CH_PS1_TRIANGLE_BUTTON " Erase  "
+			CH_PS1_SQUARE_BUTTON " BIOS");
 
 		endFrame(ctx);
 	}
@@ -194,7 +225,8 @@ static void runLaunchScreen(
 	const char    *blurb1,
 	const char    *blurb2,
 	const uint8_t *exe,
-	int            eraseRam
+	int            eraseRam,
+	int            reinitKernel
 ) {
 	AppLaunchPlan plan;
 	AppPlanResult result = planEmbeddedApp(exe, eraseRam, &plan);
@@ -213,8 +245,17 @@ static void runLaunchScreen(
 		return;
 	}
 
-	if (!confirmHandoff(ctx, title, blurb1, blurb2, exe, &eraseRam, &plan))
+	if (!confirmHandoff(ctx, title, blurb1, blurb2, exe, &eraseRam,
+	                    &reinitKernel, &plan))
 		return;
+
+	/*
+	 * Rebuild the kernel before quiescing: this makes BIOS calls, so it has
+	 * to happen while the BIOS is still usable and interrupts are still on.
+	 * runAppLaunch() quiesces immediately afterwards.
+	 */
+	if (reinitKernel)
+		reinitializeBIOSForHandoff();
 
 	/* Never returns. */
 	runAppLaunch(&plan);
@@ -234,7 +275,8 @@ void runSIOLoader(
 		"The standalone serial loader will start and",
 		"wait for a PS-EXE on SIO1 at 115200 8N2.",
 		sioLoaderExe,
-		SIO_LOADER_ERASE_RAM
+		SIO_LOADER_ERASE_RAM,
+		SIO_LOADER_REINIT_KERNEL
 	);
 }
 
@@ -264,6 +306,7 @@ void runUniROMLauncher(
 		"UniROM will be copied to RAM and started.",
 		"For a real UniROM cart, use the cart entry.",
 		uniromExe,
-		UNIROM_ERASE_RAM
+		UNIROM_ERASE_RAM,
+		UNIROM_REINIT_KERNEL
 	);
 }
