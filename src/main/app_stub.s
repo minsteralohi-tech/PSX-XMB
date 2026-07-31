@@ -152,8 +152,48 @@ appCopyForward:
 	 * gets its PS-EXE memfill. app_launch.c has already proven that no
 	 * range covers the payload just copied, this code, or the parameter
 	 * and list blocks it is reading from. */
+	/*
+	 * Verify the copy word for word before going any further.
+	 *
+	 * This settles the one question the marks cannot: the 240p suite reaches
+	 * the final mark - so the copy, the cache flush and the jump all happen -
+	 * and then dies. Either the bytes at the destination are wrong, or they
+	 * are right and the fault is in the environment the program is handed.
+	 * Those need completely different fixes, and guessing between them has
+	 * already cost several build cycles.
+	 *
+	 * MAGENTA and a hang here means the copy is corrupt.
+	 * Reaching green means the destination matches the source exactly, and
+	 * the hand-off mechanics are not the problem.
+	 */
+	lw      $a0,  0($s7)          /* destination */
+	lw      $a1,  4($s7)          /* source      */
+	lw      $a2,  8($s7)          /* word count  */
+	beq     $a2, $zero, appVerifyOk
+	nop
+appVerifyLoop:
+	lw      $t2, 0($a0)
+	lw      $t3, 0($a1)
+	bne     $t2, $t3, appVerifyBad
+	nop
+	addiu   $a0, $a0, 4
+	addiu   $a1, $a1, 4
+	addiu   $a2, $a2, -1
+	bne     $a2, $zero, appVerifyLoop
+	nop
+	b       appVerifyOk
+	nop
+
+appVerifyBad:
+	mark    0x1f1f                /* magenta-ish: copy mismatch */
+appVerifyHang:
+	b       appVerifyHang
+	nop
+
+appVerifyOk:
+
 appFills:
-	mark    0x4000                /* green: payload copied */
+	mark    0x4000                /* green: payload copied and verified */
 
 	lw      $a3, 24($s7)          /* fill list pointer */
 	beq     $a3, $zero, appFinish
