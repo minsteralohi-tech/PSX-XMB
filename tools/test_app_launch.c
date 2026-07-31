@@ -323,6 +323,53 @@ static void testBssPushesArenaAside(void) {
 	}
 }
 
+static void test240pSuite(void) {
+	printf("240p Test Suite (0x80010000, 393216 bytes, sp 0x801ffff0)\n");
+
+	/* Exactly the header of the shipped assets/240p.exe. */
+	makeExe(0x80010000, 0x80010000, 0x60000, 0, 0, 0x801ffff0);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+
+	/* It loads straight over this dashboard, so the trampoline is not
+	 * optional here - this is the case stage 1 exists for. */
+	CHECK(plan.useStage1 == 1);
+	CHECK(plan.dest == 0x80010000);
+	CHECK(plan.destEnd == 0x80070000);
+	CHECK(plan.sp == 0x801ffff0);
+	CHECK(plan.fillCount == 0);          /* no BSS in its header */
+
+	/* Exec() is unavailable for it, and asking must be refused rather than
+	 * silently produce a plan that cannot work. */
+	CHECK(planUseBiosExec(&plan, 1) == 0);
+	CHECK(plan.useBiosExec == 0);
+
+	/*
+	 * Its stack (0x801ffff0) lands inside the chosen arena. That is allowed
+	 * - stage 1 has jumped before the target pushes anything - but only
+	 * because stage 1 uses its own scratch stack for the BIOS FlushCache
+	 * call rather than the target's. Pin both facts here: if the arena ever
+	 * stops covering the target stack this test still passes, and if the
+	 * scratch stack is ever removed the reason it was needed is recorded.
+	 */
+	uint32_t arenaStart = plan.arena;
+	uint32_t arenaEnd   = plan.arena + APP_ARENA_SIZE;
+	uint32_t scratch    = plan.arena + APP_ARENA_STACK_OFF;
+
+	CHECK(plan.sp >= arenaStart && plan.sp < arenaEnd);
+	CHECK(scratch >= arenaStart && scratch < arenaEnd);
+
+	/* The scratch stack must sit above the fill list and stage 1's code so
+	 * a BIOS call cannot walk down into either. */
+	CHECK(scratch > plan.arena + APP_ARENA_FILL_OFF);
+	CHECK(scratch - (plan.arena + APP_ARENA_FILL_OFF) >= 1024);
+	CHECK(APP_ARENA_STACK_OFF > APP_ARENA_PARAM_OFF);
+
+	/* And the arena must still clear the payload itself. */
+	CHECK(!(arenaStart < plan.destEnd && plan.dest < arenaEnd));
+}
+
 static void testBiosExecSelection(void) {
 	printf("BIOS Exec() hand-off selection\n");
 
@@ -382,6 +429,7 @@ int main(void) {
 	testEraseRamFills();
 	testRejections();
 	testBssPushesArenaAside();
+	test240pSuite();
 	testBiosExecSelection();
 	testPhysicalAddressesAreCanonicalised();
 

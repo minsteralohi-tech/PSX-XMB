@@ -275,13 +275,30 @@ what can be launched. Measured contents of the 1,624,064-byte payload:
 
 | Item | Bytes |
 |---|---:|
-| BGM x3 (ps3xmb, ps4xmb, sanctuary) | 970,192 |
-| textures | 179,584 -> 128,992 |
+| BGM x2 (ps3xmb, ps4xmb) | 598,432 |
+| **240p.exe** | **395,264** |
 | code + data | ~174,640 |
 | unirom_bin.exe | 137,216 |
+| textures | 128,992 |
 | SFX x9 | 123,504 |
 | cdloader.exe | 26,624 |
 | sioloader.exe | 8,192 |
+| **total** | **1,596,976** |
+
+That ends at `0x80195E30`, leaving 424 KB for `.bss` and the heap.
+
+Fitting the 240p Test Suite needed two things given up:
+
+| Given up | Freed |
+|---|---:|
+| `sanctuary.vag` dropped from the BGM list | 371,760 |
+| lava/earth/moon textures 8bpp -> 4bpp | 50,592 |
+
+`assets/sanctuary.vag` is still in the repo. To bring the track back, uncomment
+its `addBinaryFile()` line in `CMakeLists.txt` and restore `bgm3Sound` in
+`sound.c`'s `bgmTable[]`/`bgmNames[]` - `BGM_COUNT`, the SPU slot size and the
+Music settings list all derive from those two arrays. Something else has to go
+first, though: there is no longer room for both it and the 240p suite.
 
 The three roaming planet textures (lava, earth, moon) are 4bpp, saving 50,592
 bytes against 8bpp. Their PNGs were requantized to 16 colours with
@@ -298,6 +315,24 @@ Dead files removed (they were in `assets/` but no `addBinaryFile` line ever
 referenced them, so they cost disc space only, never RAM): `bgm.vag`,
 `newbgm.vag`, `bgm3.vag`, `cdloaderold.exe`, `cdlogo.tmd`, `pickup.vag`,
 `dpad.png`, `n00brom.rom`, plus the uncompiled `n00brom_launch.c/.h`.
+
+## The 240p Test Suite and the arena scratch stack
+
+240p loads at `0x80010000` - straight over this dashboard - so it always takes
+the stage 1 path; there is no direct-jump or `Exec()` option for it.
+
+It also asks for `$sp = 0x801ffff0`, which is **inside** the arena at
+`0x801ff000`. That is fine in itself: stage 1 has jumped before the target
+pushes anything. But stage 1 used to switch to the target's stack *before*
+calling BIOS `FlushCache`, which would have had the BIOS pushing into the code
+it was executing. FlushCache is unlikely to use the ~4 KB needed to actually
+reach it, but "unlikely" is not a basis for a hand-off.
+
+Stage 1 now uses its own scratch stack at the top of the arena
+(`APP_ARENA_STACK_OFF`, ~1.7 KB clear of the fill list) for the BIOS call, and
+only switches to the target's stack in the last three instructions before the
+jump. `tools/test_app_launch.c` pins this down so the reason it exists is not
+lost.
 
 ## Not yet verified
 

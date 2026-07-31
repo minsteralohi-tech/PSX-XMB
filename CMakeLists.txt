@@ -164,7 +164,13 @@ addBinaryFile("${RELEASE_NAME}" sfxPs4ConfirmSound assets/ps4_confirm.vag)
 addBinaryFile("${RELEASE_NAME}" sfxPs4CancelSound  assets/ps4_cancel.vag)
 addBinaryFile("${RELEASE_NAME}" bgm1Sound assets/ps3xmb.vag)
 addBinaryFile("${RELEASE_NAME}" bgm2Sound assets/ps4xmb.vag)
-addBinaryFile("${RELEASE_NAME}" bgm3Sound assets/sanctuary.vag)
+# assets/sanctuary.vag is deliberately NOT embedded: at 371,760 bytes it was
+# the single largest thing that could be given up to make room for the 240p
+# Test Suite below. The file is kept in assets/ so the track can be brought
+# back - re-add the line here and the bgm3Sound entry in src/main/sound.c's
+# bgmTable[], and everything else (BGM_COUNT, the SPU slot size, the Music
+# settings list) follows automatically.
+#addBinaryFile("${RELEASE_NAME}" bgm3Sound assets/sanctuary.vag)
 addBinaryFile("${RELEASE_NAME}" spuTestSound assets/spu.vag)
 
 # The Fast Boot loader (cdloader.exe) embedded as a raw PS-EXE blob, launched
@@ -184,6 +190,13 @@ addBinaryFile("${RELEASE_NAME}" uniromExe assets/unirom_bin.exe)
 # the two-stage handoff in src/main/app_launch.c. This is a separately
 # built, hardware-proven program; the dashboard only carries and starts it.
 addBinaryFile("${RELEASE_NAME}" sioLoaderExe assets/sioloader.exe)
+
+# Artemio Urbina's 240p Test Suite, launched from Hardware Tests. At 395,264
+# bytes this is the largest thing embedded here and it only fits because
+# assets/sanctuary.vag was dropped from the BGM list and the three roaming
+# planet textures went from 8bpp to 4bpp. It loads at 0x80010000 - on top of
+# this dashboard - so it is always launched through the stage 1 trampoline.
+addBinaryFile("${RELEASE_NAME}" suite240pExe assets/240p.exe)
 
 ## CD-ROM image
 
