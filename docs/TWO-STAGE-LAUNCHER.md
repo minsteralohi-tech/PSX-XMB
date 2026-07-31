@@ -368,9 +368,18 @@ the dashboard, so the dangling pointers still happen to point at intact code.
 It looked like a trampoline bug purely because 240p was the first target to
 load low.
 
-`quiesceCommon()` now calls `uninstallSerialTTY()` first, before anything else
-and while the BIOS is still usable, restoring whatever device the kernel had
-before.
+**Removing the device at hand-off time was the wrong fix and made things
+worse.** `RemoveDevice` invokes the driver's own deinit handler, which writes
+to SIO1 and spins forever waiting for TX-ready when no cable is attached - so
+the hand-off froze the moment X was pressed, before the SPU had even been
+silenced (the music kept playing, which is what identified it).
+
+The dashboard now does not install a TTY device at all. `src/main/tty_serial.c`
+and `.h` are deleted and `installSerialTTY()` is gone from `main.c`. Serial is
+the standalone SIO loader's job now, so the redirect bought nothing, and
+leaving the kernel's own TTY untouched means there is nothing dangling to clean
+up and no BIOS call to block on. `LOG()` compiles to nothing in release builds,
+so nothing else depended on it.
 
 Worth keeping in view: the direct copy-and-jump has worked on three targets
 (cdloader, the standalone SIO loader, UniROM-over-serial) and stage 1 has now

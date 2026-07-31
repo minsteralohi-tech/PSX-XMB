@@ -87,7 +87,6 @@ addPS1Executable(
 	src/main/icon.c
 	src/main/model_test.c
 	src/main/xmb_menu.c
-	src/main/tty_serial.c
 	src/main/bios_calls.s
 	src/main/hud.c
 	src/main/badge.c
