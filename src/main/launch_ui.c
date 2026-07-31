@@ -197,7 +197,7 @@ static int confirmHandoff(
 		snprintf(line, sizeof(line), "Source   %08lX - %08lX",
 			(unsigned long) plan->src,
 			(unsigned long) (plan->src + plan->bodySize));
-		printString(ctx, 24, 148, 0xffff60, line);
+		printString(ctx, 24, 148, 0x60ffff, line);   // 0xBBGGRR: yellow
 
 		snprintf(line, sizeof(line), "Arena    %08lX      Entry %08lX",
 			(unsigned long) plan->arena,

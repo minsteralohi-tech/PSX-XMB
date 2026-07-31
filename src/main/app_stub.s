@@ -149,6 +149,7 @@ appStubStart:
 	addiu   $t1, $t1, -4
 appCopyBackward:
 	lw      $t2, 0($t0)
+	nop                           /* load delay slot */
 	sw      $t2, 0($t1)
 	addiu   $t0, $t0, -4
 	addiu   $t1, $t1, -4
@@ -160,6 +161,7 @@ appCopyBackward:
 
 appCopyForward:
 	lw      $t2, 0($a1)
+	nop                           /* load delay slot */
 	sw      $t2, 0($a0)
 	addiu   $a1, $a1, 4
 	addiu   $a0, $a0, 4
@@ -197,6 +199,7 @@ appCopyForward:
 appVerifyLoop:
 	lw      $t2, 0($a0)
 	lw      $t3, 0($a1)
+	nop                           /* load delay slot for $t3 */
 	bne     $t2, $t3, appVerifyBad
 	nop
 	addiu   $a0, $a0, 4
@@ -219,6 +222,7 @@ appFills:
 	mark    0x4000                /* green: payload copied and verified */
 
 	lw      $a3, 24($s7)          /* fill list pointer */
+	nop                           /* load delay slot */
 	beq     $a3, $zero, appFinish
 	nop
 
