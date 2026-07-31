@@ -17,6 +17,23 @@
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
 static void quiesceCommon(void) {
+	// 0. Put both serial buses back to a neutral state.
+	//
+	//    main.c calls initSerialIO(115200) and initControllerBus(), so SIO1
+	//    is configured for 115200 8N2 and SIO0 is set up for this dashboard's
+	//    own controller polling. A launched program that uses the BIOS pad
+	//    routines expects to configure SIO0 itself from a quiet port, and can
+	//    hang waiting on a status bit if it inherits a half-configured one.
+	//
+	//    Writing 0x0040 is the documented reset for both ports; writing 0
+	//    afterwards leaves them disabled, which is how the BIOS hands them to
+	//    a freshly booted program. Anything that wants them re-initialises
+	//    them anyway, so this cannot take a working path away.
+	SIO_CTRL(0) = 0x0040;
+	SIO_CTRL(0) = 0x0000;
+	SIO_CTRL(1) = 0x0040;
+	SIO_CTRL(1) = 0x0000;
+
 	// Nothing to un-hook from the BIOS here: the dashboard no longer installs
 	// a TTY device at all (see the note in main.c). Removing one at this point
 	// turned out to be actively harmful - RemoveDevice calls the driver's
