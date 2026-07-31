@@ -187,15 +187,27 @@ static int confirmHandoff(
 			(unsigned long) plan->bodySize);
 		printString(ctx, 24, 134, 0xffffff, line);
 
+		/*
+		 * The source blob's address, which is the one number that decides
+		 * whether the copy can possibly work. If this range overlaps the
+		 * Target range above, the copy eats its own source and the payload
+		 * is corrupt no matter what else is right - which is exactly what
+		 * stage 1's verify has been reporting for the 240p suite.
+		 */
+		snprintf(line, sizeof(line), "Source   %08lX - %08lX",
+			(unsigned long) plan->src,
+			(unsigned long) (plan->src + plan->bodySize));
+		printString(ctx, 24, 148, 0xffff60, line);
+
 		snprintf(line, sizeof(line), "Arena    %08lX      Entry %08lX",
 			(unsigned long) plan->arena,
 			(unsigned long) plan->entry);
-		printString(ctx, 24, 148, 0xffffff, line);
+		printString(ctx, 24, 162, 0xffffff, line);
 
 		snprintf(line, sizeof(line), "Dash end %08lX      Live  %08lX",
 			(unsigned long) plan->imageEnd,
 			(unsigned long) plan->liveEnd);
-		printString(ctx, 24, 162, 0xffffff, line);
+		printString(ctx, 24, 176, 0xffffff, line);
 
 		/* Which handoff this will use. "Direct" is the same copy-and-jump
 		 * that has always been used here; "Stage 1" is the trampoline. */
@@ -203,12 +215,12 @@ static int confirmHandoff(
 			plan->useStage1   ? "Stage 1 trampoline" :
 			plan->useBiosExec ? "BIOS Exec() (as the BIOS boots it)"
 			                  : "Direct copy + jump");
-		printString(ctx, 24, 176, 0x60ff60, line);
+		printString(ctx, 24, 190, 0x60ff60, line);
 
 		snprintf(line, sizeof(line), "Erase RAM  %s",
 			*eraseRam ? "YES - wipe the dashboard first"
 			          : "no  - leave RAM as it is");
-		printString(ctx, 24, 190, 0x60ff60, line);
+		printString(ctx, 24, 204, 0x60ff60, line);
 
 		printString(ctx, 16, ctx->screenHeight - 40, 0x808080,
 			"Reset or power-cycle to return to the dashboard.");
