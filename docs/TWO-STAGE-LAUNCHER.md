@@ -343,7 +343,8 @@ which step it reached instead of showing a black screen:
 |---|---|---|
 | nothing / black | stage 1 never entered | the install or the jump in `runStagedLaunch()` |
 | red | entered | the payload copy |
-| green | payload copied | the zero-fills |
+| magenta | copy verify failed | the payload copy itself is corrupt |
+| green | payload copied **and verified word for word** | the zero-fills |
 | yellow | fills done | the scratch-stack switch or BIOS FlushCache |
 | orange | FlushCache returned | the target itself, or `$gp`/`$sp` |
 | the target's own output | it ran | - |
@@ -386,6 +387,24 @@ Worth keeping in view: the direct copy-and-jump has worked on three targets
 failed on three (the original in-dashboard SIO loader, and the 240p suite both
 with and without the RAM erase). That asymmetry is the reason these marks
 exist - every one of those failures looked identical from the outside.
+
+## Why ps1-packer --tload does not help here
+
+`--tload` builds an image that loads at a high address and copies itself down
+to its real one. On this console that cannot work for the 240p suite, and the
+arithmetic is decidable rather than a matter of opinion:
+
+- the dashboard payload ends at `0x80195E30`, with `.bss`, the heap and the
+  stack above it (`$sp` is around `0x8019e0c8`);
+- a 393,216-byte relocated image would have to land near `0x80196000`, i.e.
+  directly on top of that stack. The dashboard would destroy the stack it was
+  standing on part-way through the copy.
+
+Doing the first copy from stage 1 avoids that - but then stage 1 copies the
+image high and the packed stub copies it down again, and **that second copy is
+the same operation stage 1 already performs**. It is the identical mechanism
+with two extra steps and one more thing to go wrong, so it cannot fix a fault
+in that mechanism.
 
 ## Not yet verified
 
