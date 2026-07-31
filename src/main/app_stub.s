@@ -104,10 +104,30 @@ appStubStart:
 
 	mark    0x0040                /* red: entered stage 1 */
 
-	/* ---- 1. move the payload into place ---------------------------- */
+	/* ---- 1. move the payload into place ---------------------------- *
+	 *
+	 * Both pointers are forced into KSEG1 (uncached) by setting bit 29.
+	 *
+	 * The word-for-word verify below caught a real mismatch on a 393,216-byte
+	 * copy whose source and destination provably do not overlap and whose
+	 * loop is correct, which leaves cache coherency as the cause. The R3000
+	 * has no write-back data cache, but it does have a write buffer and a
+	 * 4 KB instruction cache, and this copy writes over the region the
+	 * dashboard was executing from moments earlier - so those addresses are
+	 * exactly the ones still held in the I-cache. Going through KSEG1 makes
+	 * every load and store hit RAM directly and takes the whole question off
+	 * the table. A bulk copy done once at hand-off time does not need the
+	 * cache anyway.
+	 *
+	 * KSEG0 0x80000000-0x9fffffff and KSEG1 0xa0000000-0xbfffffff address the
+	 * same physical RAM, so this changes nothing about where the bytes land.
+	 */
 	lw      $a0,  0($s7)          /* destination */
 	lw      $a1,  4($s7)          /* source      */
 	lw      $a2,  8($s7)          /* word count  */
+	lui     $t3, 0x2000           /* bit 29: KSEG0 -> KSEG1 */
+	or      $a0, $a0, $t3
+	or      $a1, $a1, $t3
 
 	beq     $a2, $zero, appFills
 	nop
@@ -169,6 +189,9 @@ appCopyForward:
 	lw      $a0,  0($s7)          /* destination */
 	lw      $a1,  4($s7)          /* source      */
 	lw      $a2,  8($s7)          /* word count  */
+	lui     $t4, 0x2000           /* compare uncached, same as the copy */
+	or      $a0, $a0, $t4
+	or      $a1, $a1, $t4
 	beq     $a2, $zero, appVerifyOk
 	nop
 appVerifyLoop:
@@ -202,6 +225,8 @@ appFills:
 appFillNext:
 	lw      $a0, 0($a3)           /* start      */
 	lw      $a1, 4($a3)           /* word count */
+	lui     $t4, 0x2000           /* uncached, as above */
+	or      $a0, $a0, $t4
 	beq     $a1, $zero, appFinish
 	nop
 	addiu   $a3, $a3, 8
