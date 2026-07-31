@@ -192,6 +192,24 @@ static void runLaunchScreen(
 	runAppLaunch(&plan);
 }
 
+void runSIOLoader(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+) {
+	(void) state;
+	(void) item;
+
+	runLaunchScreen(
+		ctx,
+		"SIO LOADER",
+		"The standalone serial loader will start and",
+		"wait for a PS-EXE on SIO1 at 115200 8N2.",
+		sioLoaderExe,
+		&SIO_LOADER_CONFIG
+	);
+}
+
 void run240pSuite(
 	RenderContext  *ctx,
 	UIState        *state,
