@@ -334,6 +334,28 @@ only switches to the target's stack in the last three instructions before the
 jump. `tools/test_app_launch.c` pins this down so the reason it exists is not
 lost.
 
+## Diagnosing a stage 1 failure
+
+Stage 1 paints the whole screen a flat colour at each phase, so a failure says
+which step it reached instead of showing a black screen:
+
+| Colour left on screen | Reached | So the failure is in |
+|---|---|---|
+| nothing / black | stage 1 never entered | the install or the jump in `runStagedLaunch()` |
+| red | entered | the payload copy |
+| blue | payload copied | the zero-fills |
+| yellow | fills done | the scratch-stack switch or BIOS FlushCache |
+| white | FlushCache returned | the target itself, or `$gp`/`$sp` |
+| the target's own output | it ran | - |
+
+Set `APP_STUB_MARKS` to 0 in `app_stub.s` to compile them out.
+
+Worth keeping in view: the direct copy-and-jump has worked on three targets
+(cdloader, the standalone SIO loader, UniROM-over-serial) and stage 1 has now
+failed on three (the original in-dashboard SIO loader, and the 240p suite both
+with and without the RAM erase). That asymmetry is the reason these marks
+exist - every one of those failures looked identical from the outside.
+
 ## Not yet verified
 
 The planner logic is tested on the host. Stage 1 itself, the erase path and
