@@ -70,7 +70,10 @@ void runMusicSettings(RenderContext *ctx, UIState *state, const MenuItem *item) 
 		;
 
 	int catIndex = CAT_BGM;
-	int valIndex = valueCurrent(catIndex);
+	// Start on the first value rather than the applied one: the list marks
+	// what is currently applied anyway, and opening from a fixed position
+	// makes the screen behave the same way every time.
+	int valIndex = 0;
 	bool valueOpen = false;
 	int slideFx = 0;   // 0 = category column only, 256 = value column fully in
 
@@ -113,7 +116,7 @@ void runMusicSettings(RenderContext *ctx, UIState *state, const MenuItem *item) 
 			}
 			if (pressed & PAD_BTN_CROSS) {
 				playConfirmSound();
-				valIndex  = valueCurrent(catIndex);
+				valIndex  = 0;   // open at the top, see above
 				valueOpen = true;
 			}
 			if (pressed & PAD_BTN_CIRCLE) {

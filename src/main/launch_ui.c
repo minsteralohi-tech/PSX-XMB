@@ -28,6 +28,7 @@
 /* The standalone loader, embedded via addBinaryFile() in CMakeLists.txt. */
 extern const uint8_t sioLoaderExe[];
 extern const uint8_t uniromExe[];
+extern const uint8_t suite240pExe[];
 
 /*
  * The standalone loader does not need a cold-boot RAM state - it validates
@@ -51,6 +52,19 @@ extern const uint8_t uniromExe[];
 #define UNIROM_ERASE_RAM  0
 #define UNIROM_BIOS_EXEC  1
 #define SIO_LOADER_BIOS_EXEC 0
+
+/*
+ * The 240p Test Suite loads at 0x80010000, i.e. straight over this dashboard,
+ * so planEmbeddedApp() always routes it through the stage 1 trampoline - there
+ * is no direct-jump option for it and therefore no Exec() option either.
+ *
+ * It is bare-metal (it installs its own interrupt handlers and does not lean
+ * on BIOS services), which is why it already runs correctly when sent to the
+ * standalone SIO loader over serial. Erasing RAM is not needed on top of that;
+ * Triangle turns it on if a future build ever wants it.
+ */
+#define SUITE240P_ERASE_RAM  0
+#define SUITE240P_BIOS_EXEC  0
 
 
 static void waitForRelease(void) {
@@ -267,6 +281,25 @@ void runSIOLoader(
 		sioLoaderExe,
 		SIO_LOADER_ERASE_RAM,
 		SIO_LOADER_BIOS_EXEC
+	);
+}
+
+void run240pSuite(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+) {
+	(void) state;
+	(void) item;
+
+	runLaunchScreen(
+		ctx,
+		"240P TEST SUITE",
+		"Artemio's 240p Test Suite will be copied",
+		"over this dashboard and started.",
+		suite240pExe,
+		SUITE240P_ERASE_RAM,
+		SUITE240P_BIOS_EXEC
 	);
 }
 

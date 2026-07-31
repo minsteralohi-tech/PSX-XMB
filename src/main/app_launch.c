@@ -466,7 +466,7 @@ __attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan)
 	params[4] = gp;
 	params[5] = sp;
 	params[6] = arena + APP_ARENA_FILL_OFF;
-	params[7] = 0;
+	params[7] = arena + APP_ARENA_STACK_OFF;
 
 	/* Stage 1 was just written as data. */
 	flushCache();

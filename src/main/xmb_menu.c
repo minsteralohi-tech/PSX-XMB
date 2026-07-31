@@ -59,6 +59,7 @@ typedef struct {
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item);
+static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
@@ -99,6 +100,7 @@ static const XMBEntry hwItems[] = {
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },
 	{ "UniROM 8.0",         8, xmbLaunchUniROM,    true },
 	{ "UniROM (cart installed)", 8, xmbReturnToUniROMCart, true },
+	{ "240p Test Suite",   6, xmbLaunch240pSuite, true },
 };
 
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -188,6 +190,12 @@ static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item
 
 /* UniROM 8.0: chain-load the embedded real UniROM build (see
  * unirom_launch.c). Never returns. */
+/* 240p Test Suite: same shared confirmation screen and hand-off as the two
+ * UniROM entries above (see launch_ui.c). Returns if the user backs out. */
+static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item) {
+	run240pSuite(ctx, state, item);
+}
+
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item) {
 	// The confirmation screen, the plan validation and the handoff all live
 	// in launch_ui.c now, shared with Settings -> SIO Loader, so the two
@@ -597,8 +605,13 @@ void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 		}
 		if ((state->buttonsPressed & PAD_BTN_CROSS) || (nav & PAD_BTN_RIGHT)) {
 			subMenuOpen = true;
-			subIndex    = themeOptCurrent(themeOptIndex);
-			subPosFx    = subIndex * 256;
+			// Always open on the first entry rather than on whatever is
+			// currently applied. The applied value is still shown by the
+			// tick/highlight in the list, so nothing is lost, and the
+			// highlight now starts from a predictable place every time
+			// instead of jumping to a different row per option.
+			subIndex    = 0;
+			subPosFx    = 0;
 			playConfirmSound();
 		}
 		if ((state->buttonsPressed & PAD_BTN_CIRCLE) || (nav & PAD_BTN_LEFT)) {
@@ -651,8 +664,10 @@ void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 		}
 		if ((state->buttonsPressed & PAD_BTN_CROSS) || (nav & PAD_BTN_RIGHT)) {
 			musicSubMenuOpen = true;
-			musicSubIndex    = (musicOptIndex == 0) ? getBGMIndex() : getSFXSetIndex();
-			musicSubPosFx    = musicSubIndex * 256;
+			// Open at the top, not at the applied track/set - see the
+			// matching note in the theme submenu above.
+			musicSubIndex    = 0;
+			musicSubPosFx    = 0;
 			playConfirmSound();
 		}
 		if ((state->buttonsPressed & PAD_BTN_CIRCLE) || (nav & PAD_BTN_LEFT)) {

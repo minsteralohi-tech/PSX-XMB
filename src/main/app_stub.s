@@ -8,7 +8,7 @@
  * Parameter block, eight words:
  *   +0  destination     +4  source        +8  word count
  *   +12 entry PC        +16 GP            +20 SP
- *   +24 zero-fill list  +28 reserved
+ *   +24 zero-fill list  +28 scratch stack top
  *
  * The zero-fill list is an array of (start, wordCount) pairs terminated by a
  * zero word count.
@@ -39,9 +39,10 @@ appStubStart:
 	 * live across the FlushCache call and reloaded the entry point through
 	 * it afterwards, which only works if the BIOS honours the o32 ABI for
 	 * every register - a bet with no upside. */
-	lw      $s0, 12($s7)          /* entry PC */
-	lw      $s1, 16($s7)          /* GP       */
-	lw      $s2, 20($s7)          /* SP       */
+	lw      $s0, 12($s7)          /* entry PC      */
+	lw      $s1, 16($s7)          /* GP            */
+	lw      $s2, 20($s7)          /* SP            */
+	lw      $s3, 28($s7)          /* scratch stack */
 
 	/* ---- 1. move the payload into place ---------------------------- */
 	lw      $a0,  0($s7)          /* destination */
@@ -114,10 +115,23 @@ appFillLoop:
 
 	/* ---- 3. hand over ---------------------------------------------- */
 appFinish:
-	/* Move to the target's stack before calling the BIOS: the dashboard's
-	 * stack is a static buffer inside the image, which the fills above may
-	 * just have zeroed. */
-	move    $sp, $s2
+	/*
+	 * Switch to a scratch stack at the top of the arena before calling the
+	 * BIOS. Two stacks are unusable here:
+	 *
+	 *   - the dashboard's, because it is a static buffer inside the image
+	 *     and the fills above may just have zeroed it;
+	 *   - the target's, because it may point into this arena. The 240p
+	 *     suite asks for 0x801ffff0 and the arena is 0x801ff000-0x80200000,
+	 *     so the BIOS pushing onto the target's stack would be writing into
+	 *     the code currently executing. FlushCache is unlikely to use the
+	 *     4 KB needed to actually reach it, but "unlikely" is not a basis
+	 *     for a hand-off.
+	 *
+	 * The scratch stack sits above the fill list with ~1.7 KB of room, and
+	 * becomes irrelevant the moment the jump below happens.
+	 */
+	move    $sp, $s3
 
 	/* BIOS A(44h) FlushCache. The payload was written as data, so the
 	 * instruction cache may still hold the dashboard's code for those
@@ -128,7 +142,8 @@ appFinish:
 	nop
 
 	/* PS-EXE register contract, then straight in. No memory is touched
-	 * after the BIOS call - only $s0/$s1, which the ABI protects. */
+	 * after the BIOS call - only $s0/$s1/$s2, which the ABI protects. */
+	move    $sp, $s2
 	move    $gp, $s1
 	jr      $s0
 	nop

@@ -97,6 +97,11 @@ extern "C" {
 #define APP_ARENA_SIZE        0x1000u
 #define APP_ARENA_PARAM_OFF   0x800u
 #define APP_ARENA_FILL_OFF    0x900u
+/* Scratch stack for stage 1's BIOS call, at the top of the arena growing
+ * down. It cannot use the target's stack: that may point into the arena (the
+ * 240p suite asks for 0x801ffff0), which would have the BIOS writing over the
+ * code currently executing. ~1.7 KB clear of the fill list. */
+#define APP_ARENA_STACK_OFF   (APP_ARENA_SIZE - 16u)
 #define APP_STUB_MAX_SIZE     APP_ARENA_PARAM_OFF
 
 /* [0x80010000, dest), up to two pieces of [destEnd, 0x80200000) once the

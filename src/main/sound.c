@@ -48,22 +48,26 @@ static int currentSFXSet = 0;
 // sound effects.
 extern const uint8_t spuTestSound[];
 
-// The three BGM tracks (ps3xmb.vag / ps4xmb.vag / sanctuary.vag), embedded
-// via addBinaryFile(). Downsampled to 11025 Hz rather than 44.1 kHz - PS-ADPCM
-// size scales directly with sample rate, and at full quality these three
-// tracks combined (~155 s) would need close to 2 MB on their own, nowhere
-// near fitting alongside everything else this project embeds. 11025 Hz was
-// chosen to leave real headroom (~445 KB) for 1-2 more tracks later, not
-// just to scrape by on these three - see tools/wav2vag.py's --rate.
+// The BGM tracks (ps3xmb.vag / ps4xmb.vag), embedded via addBinaryFile().
+// Downsampled to 11025 Hz rather than 44.1 kHz - PS-ADPCM size scales directly
+// with sample rate, and at full quality these would need close to 2 MB on
+// their own, nowhere near fitting alongside everything else this project
+// embeds. See tools/wav2vag.py's --rate.
+//
+// A third track, "Sanctuary" (assets/sanctuary.vag), was dropped to make room
+// for the 240p Test Suite: at 371,760 bytes it was the largest single thing
+// that could be given up. The .vag is still in assets/ - to restore it,
+// uncomment its addBinaryFile() line in CMakeLists.txt and put bgm3Sound back
+// in the two tables below. Nothing else needs changing: BGM_COUNT, the SPU
+// slot size and the Music settings list are all derived from them.
 extern const uint8_t bgm1Sound[];
 extern const uint8_t bgm2Sound[];
-extern const uint8_t bgm3Sound[];
 
 // All selectable BGM tracks. They share a single SPU RAM slot (sized for the
 // largest one in initSound()); selectBGM() swaps which one is loaded. To add
 // more later, embed the .vag via addBinaryFile() and add it here.
-static const uint8_t *const bgmTable[] = { bgm1Sound, bgm2Sound, bgm3Sound };
-static const char *const bgmNames[]    = { "PS3 XMB", "PS4 XMB", "Sanctuary" };
+static const uint8_t *const bgmTable[] = { bgm1Sound, bgm2Sound };
+static const char *const bgmNames[]    = { "PS3 XMB", "PS4 XMB" };
 #define BGM_COUNT ((int)(sizeof(bgmTable) / sizeof(bgmTable[0])))
 
 static int            currentBGM     = 0;
