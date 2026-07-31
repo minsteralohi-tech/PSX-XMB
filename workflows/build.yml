@@ -61,6 +61,15 @@ jobs:
       run: |
         chmod +x PSX-iTests/.github/scripts/*.sh
 
+    # Host-side tests for the two-stage launcher's planner (src/main/app_launch.c).
+    # These need no MIPS toolchain and no console: they check arena selection,
+    # overlap rules and the zero-fill ranges that decide whether a handoff
+    # lands or produces a black screen. Runs before the long toolchain/build
+    # steps so a planner regression fails fast.
+    - name: Run launcher planner tests
+      run: |
+        make -C PSX-iTests/tools -f Makefile.tests
+
     - name: Install prerequisites
       run: |
         sudo apt-get update -y
