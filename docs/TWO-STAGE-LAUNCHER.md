@@ -343,12 +343,34 @@ which step it reached instead of showing a black screen:
 |---|---|---|
 | nothing / black | stage 1 never entered | the install or the jump in `runStagedLaunch()` |
 | red | entered | the payload copy |
-| blue | payload copied | the zero-fills |
+| green | payload copied | the zero-fills |
 | yellow | fills done | the scratch-stack switch or BIOS FlushCache |
-| white | FlushCache returned | the target itself, or `$gp`/`$sp` |
+| orange | FlushCache returned | the target itself, or `$gp`/`$sp` |
 | the target's own output | it ran | - |
 
 Set `APP_STUB_MARKS` to 0 in `app_stub.s` to compile them out.
+
+### What the marks found
+
+The 240p suite reached **orange** - stage 1 ran to completion, copied the
+payload, flushed the cache and jumped. The fault was never in the trampoline.
+
+It was the TTY device. `tty_serial.c` installs a custom "tty" into the kernel's
+device table with `biosAddDevice(&ttyDCB)`, and `ttyDCB` plus every handler it
+points at lives inside this dashboard's image at ~`0x8001xxxx`. The 240p suite
+loads at `0x80010000` and writes straight over them, leaving the kernel's
+device table pointing into the middle of the newly loaded program. The next
+BIOS call touching "tty" jumps into it.
+
+That also explains why nothing else ever hit this: cdloader (`0x801EA300`), the
+standalone SIO loader (`0x801B0000`) and UniROM (`0x801D0000`) all load *above*
+the dashboard, so the dangling pointers still happen to point at intact code.
+It looked like a trampoline bug purely because 240p was the first target to
+load low.
+
+`quiesceCommon()` now calls `uninstallSerialTTY()` first, before anything else
+and while the BIOS is still usable, restoring whatever device the kernel had
+before.
 
 Worth keeping in view: the direct copy-and-jump has worked on three targets
 (cdloader, the standalone SIO loader, UniROM-over-serial) and stage 1 has now
