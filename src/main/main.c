@@ -25,7 +25,6 @@
 #include "main/mainmenu.h"
 #include "main/renderer.h"
 #include "main/sound.h"
-#include "main/tty_serial.h"
 #include "main/ui.h"
 #include "main/xmb_bg.h"
 #include "main/xmb_menu.h"
@@ -44,12 +43,24 @@ int main(int argc, const char **argv) {
 #endif
 	LOG("PSX-iTests " VERSION_STRING " (" __DATE__ " " __TIME__ ")");
 
-	// Redirect BIOS TTY output to SIO1 exactly the way UniROM does on startup:
-	// delete the current "tty" device by name and install our own replacement.
-	// This keeps us compatible with UniROM and other homebrew that do the same
-	// delete-and-replace, and prints the "Replacement Shell by Hidden0 Loaded."
-	// banner once the driver is up.
-	installSerialTTY();
+	// The dashboard no longer installs a serial TTY device.
+	//
+	// It used to delete the kernel's "tty" by name and install its own
+	// replacement, the way UniROM does. The problem is that the DCB and every
+	// handler it points at live inside this image at ~0x8001xxxx, and the
+	// kernel's device table keeps pointing at them after we hand the console
+	// to another program. A target that loads low - the 240p Test Suite loads
+	// at 0x80010000 - overwrites those handlers, and the next BIOS call that
+	// touches "tty" jumps into the middle of the launched program.
+	//
+	// Removing the device at hand-off time was worse: RemoveDevice invokes the
+	// driver's own deinit handler, which writes to SIO1 and spins forever
+	// waiting for TX-ready when nothing is plugged in, so the hand-off froze
+	// before it had even started.
+	//
+	// Serial is now the standalone SIO loader's job, so nothing here needs the
+	// redirect. Leaving the kernel's own TTY untouched means there is nothing
+	// dangling to clean up and no BIOS call to block on.
 
 	if ((GPU_GP1 & GP1_STAT_FB_MODE_BITMASK) == GP1_STAT_FB_MODE_PAL) {
 		LOG("using PAL mode");

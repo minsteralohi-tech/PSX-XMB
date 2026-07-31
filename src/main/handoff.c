@@ -9,7 +9,6 @@
 #include "ps1/gpucmd.h"
 #include "ps1/registers.h"
 #include "main/handoff.h"
-#include "main/tty_serial.h"
 
 // Longest we will wait for an in-flight DMA to drain before forcing it to
 // stop. A full display list is a few thousand words and completes in well
@@ -18,19 +17,11 @@
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
 static void quiesceCommon(void) {
-	// 0. Take our TTY device back out of the kernel's device table, FIRST,
-	//    while the BIOS is still usable and interrupts are still on.
-	//
-	//    ttyDCB and its handlers live inside this image at ~0x8001xxxx. A
-	//    program that loads over that range leaves the kernel's device table
-	//    pointing into the middle of the newly loaded program, and the next
-	//    BIOS call that touches "tty" jumps into it. That is invisible until
-	//    something actually loads low - which is exactly the difference
-	//    between the targets that have always worked here (cdloader at
-	//    0x801EA300, the SIO loader at 0x801B0000, UniROM at 0x801D0000, all
-	//    of which leave this image intact) and the 240p Test Suite, which
-	//    loads at 0x80010000.
-	uninstallSerialTTY();
+	// Nothing to un-hook from the BIOS here: the dashboard no longer installs
+	// a TTY device at all (see the note in main.c). Removing one at this point
+	// turned out to be actively harmful - RemoveDevice calls the driver's
+	// deinit handler, which blocks on SIO1 TX-ready and never returns when no
+	// cable is attached, freezing the hand-off before it started.
 
 	// 1. Silence the SPU. UniROM never touches the SPU at all (there is not
 	//    a single access to the 0x1f801c00 block anywhere in its binary), so
