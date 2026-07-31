@@ -388,7 +388,35 @@ failed on three (the original in-dashboard SIO loader, and the 240p suite both
 with and without the RAM erase). That asymmetry is the reason these marks
 exist - every one of those failures looked identical from the outside.
 
-## The 240p failure was a corrupt copy
+## The 240p failure: an unfilled load delay slot
+
+The plan screen settled it. `Source 801394A0-801994A0` against
+`Target 80010000-80070000` - no overlap, correct alignment, correct direction.
+The addresses were right the whole time, so the fault was inside the copy loop:
+
+```
+appCopyForward:
+        lw      $t2, 0($a1)
+        sw      $t2, 0($a0)     <- reads $t2 in its own load delay slot
+```
+
+`app_stub.s` is assembled with `.set noreorder`, so the assembler fills
+nothing, and the R3000 has no load interlock - the instruction after an `lw`
+still sees the register's OLD contents. Every store therefore wrote the
+previous iteration's word, and the destination came out shifted by one.
+
+It survived this long because the only other user of this stub is the
+standalone SIO loader, which receives its payload straight into place and
+passes a copy count of **zero** - the loop never ran there. The 240p suite is
+the first target that actually needed a copy.
+
+Fixed in four places: both copy loops, the verify compare (`$t3` was being read
+in its own delay slot, so the check was unreliable too) and the fill-list head
+pointer. `tools/` has no way to catch this, so the file now carries an explicit
+note and every `lw` is followed by a `nop` unless a real instruction fills the
+slot.
+
+## The earlier reading: a corrupt copy
 
 The word-for-word verify came back **magenta** - the destination did not match
 the source. That rules out the whole class of theories about inherited machine
