@@ -18,7 +18,7 @@ LDFLAGS := -fsanitize=address,undefined
 
 .PHONY: all clean
 
-all: build/test_app_launch
+all: check-entry-points build/test_app_launch
 	@./build/test_app_launch
 
 build:
@@ -26,6 +26,17 @@ build:
 
 build/test_app_launch: test_app_launch.c ../src/main/app_launch.c | build
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Cheap guard against an edit silently deleting a function that only the menu
+# tables reference: check every entry point declared in launch_ui.h has a
+# matching definition in launch_ui.c. Pure text, no compiler needed.
+.PHONY: check-entry-points
+check-entry-points:
+	@for fn in $$(sed -n 's/^void \([a-zA-Z0-9_]*\)($$/\1/p' ../src/main/launch_ui.h); do \
+		grep -q "^void $$fn(" ../src/main/launch_ui.c \
+			|| { echo "MISSING: $$fn declared in launch_ui.h but not defined in launch_ui.c"; exit 1; }; \
+		echo "  [PASS] $$fn defined"; \
+	done
 
 clean:
 	rm -rf build

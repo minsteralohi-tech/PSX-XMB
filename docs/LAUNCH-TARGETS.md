@@ -67,6 +67,19 @@ this** - there is no tooling that will catch it.
 - `planEmbeddedApp()` refuses impossible launches with a reason rather than
   jumping; `showPlanError()` displays it.
 
+## Build-time guard
+
+`make -C tools -f Makefile.tests` starts with a `check-entry-points` step that
+verifies every `void runX(...)` declared in `launch_ui.h` has a matching
+definition in `launch_ui.c`.
+
+This exists because the menu tables in `xmb_menu.c` are the only things that
+reference those functions, so deleting one is not a compile error - it surfaces
+minutes later as an `undefined reference` from the MIPS linker, pointing at a
+different file. That happened twice during development. The check is plain text
+matching, runs in under a second, and CI runs it before the toolchain is even
+installed.
+
 ## Adding another app later
 
 1. Put the `.exe` in `assets/`.
