@@ -388,6 +388,27 @@ failed on three (the original in-dashboard SIO loader, and the 240p suite both
 with and without the RAM erase). That asymmetry is the reason these marks
 exist - every one of those failures looked identical from the outside.
 
+## The 240p failure was a corrupt copy
+
+The word-for-word verify came back **magenta** - the destination did not match
+the source. That rules out the whole class of theories about inherited machine
+state, BIOS hooks and register contracts: the program was never intact in RAM
+to begin with.
+
+Source and destination were checked and provably do not overlap (`.text` then
+`.rodata`, so the blob sits at ~`0x80136270`-`0x80196270` while the destination
+is `0x80010000`-`0x80070000`), and both the copy loop and the verify loop are
+correct. That leaves cache coherency.
+
+The copy writes over precisely the region the dashboard was executing from
+moments earlier, so those addresses are exactly the ones still held in the 4 KB
+instruction cache, and the R3000 also has a write buffer between the CPU and
+RAM. Stage 1 now performs the copy, the verify and the zero-fills through
+**KSEG1** (uncached) by setting bit 29 on the pointers, so every load and store
+goes straight to RAM. KSEG0 and KSEG1 address the same physical memory, so the
+bytes land in exactly the same place; a one-shot bulk copy at hand-off time
+gains nothing from the cache.
+
 ## Why ps1-packer --tload does not help here
 
 `--tload` builds an image that loads at a high address and copies itself down
