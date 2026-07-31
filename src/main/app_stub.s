@@ -50,11 +50,14 @@
 #
 # A colour left on screen means that step completed and the NEXT one hung.
 # Reaching white and stopping means the target itself did not start.
-# Set APP_STUB_MARKS to 0 to compile them out once the path is trusted.
-.set APP_STUB_MARKS, 1
+# The progress marks are off now that the path is proven - they flashed the
+# screen on every launch. Set this to 1 to bring them back when debugging.
+# The copy-mismatch mark below is NOT covered by this switch: a corrupt copy
+# must always be visible rather than silently launching garbage.
+.set APP_STUB_MARKS, 0
 
-.macro mark colour
-.if APP_STUB_MARKS
+# Unconditional form, used only for the copy-mismatch failure.
+.macro failmark colour
 	lui     $t0, 0xbf80
 	ori     $t1, $zero, 0x0300          # GP1(03) display enable
 	sll     $t1, $t1, 16
@@ -79,6 +82,11 @@
 	lui     $t1, 0x00f0                 # 320 wide, 240 high
 	ori     $t1, $t1, 0x0140
 	sw      $t1, 0x1810($t0)
+.endm
+
+.macro mark colour
+.if APP_STUB_MARKS
+	failmark \colour
 .endif
 .endm
 # ---------------------------------------------------------------------------
@@ -211,7 +219,7 @@ appVerifyLoop:
 	nop
 
 appVerifyBad:
-	mark    0x1f1f                /* magenta-ish: copy mismatch */
+	failmark 0x1f1f               /* always shown: copy mismatch */
 appVerifyHang:
 	b       appVerifyHang
 	nop
