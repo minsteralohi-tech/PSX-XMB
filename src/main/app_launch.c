@@ -468,7 +468,16 @@ __attribute__((noreturn)) static void runStagedLaunch(const AppLaunchPlan *plan)
 	params[6] = arena + APP_ARENA_FILL_OFF;
 	params[7] = arena + APP_ARENA_STACK_OFF;
 
-	/* Stage 1 was just written as data. */
+	/*
+	 * Stage 1 was just written as data.
+	 *
+	 * Note this uses the project's own flushCache() (ps1/cache.s, which
+	 * bounces through KSEG1 to clear the cache uncached), while stage 1
+	 * itself calls the BIOS FlushCache. Both are correct; they are named
+	 * here because if the marks in app_stub.s show stage 1 never being
+	 * entered at all, this call and the jump below are the only things
+	 * between the install and it running.
+	 */
 	flushCache();
 
 	/*

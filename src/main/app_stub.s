@@ -25,6 +25,61 @@
 .set noreorder
 .set noat
 
+# ---------------------------------------------------------------------------
+# Progress marks.
+#
+# Stage 1 has now failed on three separate targets while the direct copy-and-
+# jump has worked on three others, and every failure has looked identical from
+# the outside: a black screen with no way to tell which step died. This is the
+# same trick that made the standalone SIO loader debuggable - paint the whole
+# screen a flat colour at each phase, so whatever colour is left tells you
+# exactly how far it got.
+#
+# quiesceForHandoff() issues GP1(00) which turns the display off, so the mark
+# macro re-enables it every time rather than assuming any GPU state. Written
+# with raw register pokes and no absolute addresses so the stub stays position
+# independent.
+#
+#   red      entered stage 1, about to copy
+#   blue     payload copied
+#   yellow   zero-fills done
+#   white    BIOS FlushCache returned, about to jump
+#
+# A colour left on screen means that step completed and the NEXT one hung.
+# Reaching white and stopping means the target itself did not start.
+# Set APP_STUB_MARKS to 0 to compile them out once the path is trusted.
+.set APP_STUB_MARKS, 1
+
+.macro mark colour
+.if APP_STUB_MARKS
+	lui     $t0, 0xbf80
+	ori     $t1, $zero, 0x0300          # GP1(03) display enable
+	sll     $t1, $t1, 16
+	sw      $t1, 0x1814($t0)
+	ori     $t1, $zero, 0x0800          # GP1(08) 320x240 NTSC 15bpp
+	sll     $t1, $t1, 16
+	ori     $t1, $t1, 0x0001
+	sw      $t1, 0x1814($t0)
+	lui     $t1, 0x0600                 # GP1(06) horizontal range
+	ori     $t1, $t1, 0x0260
+	ori     $t2, $zero, 0xc6
+	sll     $t2, $t2, 16
+	or      $t1, $t1, $t2
+	sw      $t1, 0x1814($t0)
+	lui     $t1, 0x0704                 # GP1(07) vertical range
+	ori     $t1, $t1, 0x0010
+	sw      $t1, 0x1814($t0)
+	lui     $t1, 0x0200                 # GP0(02) VRAM fill, colour
+	ori     $t1, $t1, \colour
+	sw      $t1, 0x1810($t0)
+	sw      $zero, 0x1810($t0)          # at (0,0)
+	lui     $t1, 0x00f0                 # 320 wide, 240 high
+	ori     $t1, $t1, 0x0140
+	sw      $t1, 0x1810($t0)
+.endif
+.endm
+# ---------------------------------------------------------------------------
+
 .section .text.appStub, "ax", @progbits
 .global appStubStart
 .global appStubEnd
@@ -43,6 +98,8 @@ appStubStart:
 	lw      $s1, 16($s7)          /* GP            */
 	lw      $s2, 20($s7)          /* SP            */
 	lw      $s3, 28($s7)          /* scratch stack */
+
+	mark    0x0040                /* red: entered stage 1 */
 
 	/* ---- 1. move the payload into place ---------------------------- */
 	lw      $a0,  0($s7)          /* destination */
@@ -93,6 +150,8 @@ appCopyForward:
 	 * range covers the payload just copied, this code, or the parameter
 	 * and list blocks it is reading from. */
 appFills:
+	mark    0x4000                /* blue: payload copied */
+
 	lw      $a3, 24($s7)          /* fill list pointer */
 	beq     $a3, $zero, appFinish
 	nop
@@ -115,6 +174,8 @@ appFillLoop:
 
 	/* ---- 3. hand over ---------------------------------------------- */
 appFinish:
+	mark    0x0044                /* yellow: zero-fills done */
+
 	/*
 	 * Switch to a scratch stack at the top of the arena before calling the
 	 * BIOS. Two stacks are unusable here:
@@ -140,6 +201,8 @@ appFinish:
 	ori     $t2, $zero, 0x00a0
 	jalr    $t2
 	nop
+
+	mark    0x7fff                /* white: FlushCache returned */
 
 	/* PS-EXE register contract, then straight in. No memory is touched
 	 * after the BIOS call - only $s0/$s1/$s2, which the ABI protects. */
