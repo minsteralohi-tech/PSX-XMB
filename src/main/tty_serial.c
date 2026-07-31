@@ -19,6 +19,7 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "main/tty_serial.h"
 
 /* ---- SIO1 registers (KSEG1 / uncached, as the readme requires) ---------- */
@@ -166,6 +167,34 @@ static void irqRestore(uint32_t sr) {
 
 /* ---- Install ------------------------------------------------------------ */
 
+static bool ttyInstalled = false;
+
+/*
+ * Take our TTY device back out of the kernel's device table.
+ *
+ * This matters far more than it looks. ttyDCB and every function pointer in
+ * it live inside this dashboard's own image, around 0x8001xxxx. A launched
+ * program that loads over that range - the 240p Test Suite loads at
+ * 0x80010000 - replaces those bytes with its own code while the kernel's
+ * device table still points at them. The next BIOS call that touches "tty"
+ * then jumps into the middle of the launched program, which looks exactly
+ * like the program failing to start.
+ *
+ * That is why cdloader (0x801EA300), the standalone SIO loader (0x801B0000)
+ * and UniROM (0x801D0000) all survived the same hand-off: they load above the
+ * dashboard, so the dangling pointers still happen to point at intact code.
+ *
+ * Removing the device by name restores whatever the kernel had before, which
+ * is the state a freshly booted program expects.
+ */
+void uninstallSerialTTY(void) {
+	if (!ttyInstalled)
+		return;
+
+	biosRemoveDevice(ttyName);
+	ttyInstalled = false;
+}
+
 void installSerialTTY(void) {
 	serialInit();
 
@@ -177,6 +206,7 @@ void installSerialTTY(void) {
 	biosClose(1);                 // drop stdout
 	biosRemoveDevice(ttyName);    // delete whatever "tty" is installed, BY NAME
 	biosAddDevice(&ttyDCB);       // install ours
+	ttyInstalled = true;
 	biosOpen(ttyName, 2);         // re-bind -> fd 0
 	biosOpen(ttyName, 1);         // re-bind -> fd 1
 

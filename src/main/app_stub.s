@@ -40,10 +40,13 @@
 # with raw register pokes and no absolute addresses so the stub stays position
 # independent.
 #
+# GP0(02h) takes a 24-bit colour packed as 0x02BBGGRR, so the low 16 bits set
+# only red and green - which is all the marks need.
+#
 #   red      entered stage 1, about to copy
-#   blue     payload copied
+#   green    payload copied
 #   yellow   zero-fills done
-#   white    BIOS FlushCache returned, about to jump
+#   orange   BIOS FlushCache returned, about to jump
 #
 # A colour left on screen means that step completed and the NEXT one hung.
 # Reaching white and stopping means the target itself did not start.
@@ -150,7 +153,7 @@ appCopyForward:
 	 * range covers the payload just copied, this code, or the parameter
 	 * and list blocks it is reading from. */
 appFills:
-	mark    0x4000                /* blue: payload copied */
+	mark    0x4000                /* green: payload copied */
 
 	lw      $a3, 24($s7)          /* fill list pointer */
 	beq     $a3, $zero, appFinish
@@ -174,7 +177,7 @@ appFillLoop:
 
 	/* ---- 3. hand over ---------------------------------------------- */
 appFinish:
-	mark    0x0044                /* yellow: zero-fills done */
+	mark    0x3f3f                /* yellow: zero-fills done */
 
 	/*
 	 * Switch to a scratch stack at the top of the arena before calling the
@@ -202,7 +205,7 @@ appFinish:
 	jalr    $t2
 	nop
 
-	mark    0x7fff                /* white: FlushCache returned */
+	mark    0x7fff                /* orange: FlushCache returned */
 
 	/* PS-EXE register contract, then straight in. No memory is touched
 	 * after the BIOS call - only $s0/$s1/$s2, which the ABI protects. */

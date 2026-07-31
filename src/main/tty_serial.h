@@ -27,6 +27,11 @@ extern "C" {
 // Call once at startup.
 void installSerialTTY(void);
 
+/* Remove our TTY device from the kernel's device table again. Must be done
+ * before handing the console to a program that may overwrite this image -
+ * see the long note in tty_serial.c. Safe to call if it was never installed. */
+void uninstallSerialTTY(void);
+
 // Write a string straight out of the installed SIO1 tty (also used internally
 // for the startup banner).
 void ttySerialWrite(const char *str);
