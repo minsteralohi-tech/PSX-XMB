@@ -43,6 +43,25 @@
 #include "main/font.h"
 #include "main/mainmenu.h"
 #include "main/xmb_bg.h"
+
+/*
+ * Theme accent for the track tiles, refreshed once per frame. 0xBBGGRR.
+ */
+static uint32_t cdAccent = 0x702810;
+static uint32_t cdGlow   = 0xffd8a0;
+
+/* Scale a 0xBBGGRR colour, clamped per channel. */
+static uint32_t glassShade(uint32_t colour, int numerator, int denominator) {
+	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
+	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
+	uint32_t b = (((colour >> 16) & 0xff) * numerator) / denominator;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
 #include "main/sound.h"
 #include "ps1/registers.h"
 
@@ -378,6 +397,10 @@ void runCDPlayer(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
+		// Follow the wallpaper, refreshed every frame so a theme change in
+		// Settings shows up here immediately.
+		xmbGetAccentColor(&cdAccent, &cdGlow);
+
 		printString(ctx, 16, 10, 0x808080, "CD MUSIC PLAYER");
 
 		if (!haveDisc) {
@@ -395,10 +418,19 @@ void runCDPlayer(
 				bool isCurrent = (trackNum == currentTrack);
 				bool isPlaying = isCurrent && (playState == CD_PLAYING);
 
-				drawRect(
+				// Same crystal tiles as the memory card grid, tinted from the
+				// current theme so the track list follows the wallpaper.
+				// The playing track gets the accent at full strength and a
+				// glow; the merely selected one gets the glow alone, which
+				// keeps "selected" and "playing" distinguishable at a glance.
+				uint32_t tint = isPlaying
+				              ? cdAccent
+				              : glassShade(cdAccent, 2, 5);
+
+				drawGlassPanel(
 					ctx, x, y, 44, 16,
-					isPlaying ? 0x1256e3 : (isCurrent ? 0x505050 : 0x282828),
-					false
+					tint,
+					(isPlaying || isCurrent) ? cdGlow : 0
 				);
 
 				snprintf(line, sizeof(line), "%02d", trackNum);

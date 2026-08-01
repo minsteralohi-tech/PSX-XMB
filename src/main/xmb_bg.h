@@ -90,6 +90,17 @@ extern uint8_t           xmbIconStyle;   // 0 Default, 1 Light, 2 Dark
 void xmbGetIconGradient(uint32_t *top, uint32_t *bot);
 
 /*
+ * Dominant colour of the current theme, for screens that draw their own
+ * translucent "crystal" tiles (the memory card grid, the CD player track
+ * list) and want to follow the wallpaper rather than stay permanently blue.
+ *
+ * *base is a dark tint meant to be drawn blended and then lightened by the
+ * caller for its sheen and bevel; *glow is a bright, near-white version for a
+ * selection bloom. Either pointer may be NULL.
+ */
+void xmbGetAccentColor(uint32_t *base, uint32_t *glow);
+
+/*
  * Wave style for the customizable PSP wave theme: 10 variants ranging from a
  * few fat slow ribbons to many thin fast ones. Named "Style 1".."Style 10"
  * in the menu; drawGouraudPSP() reads xmbWaveStyle to pick band count and

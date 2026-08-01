@@ -175,3 +175,73 @@ void drawCategoryIcon(
 
 	iconQuad(ctx, &catTex, index, x, y, size, size, 0x808080, translucent);
 }
+
+
+/* --- translucent "crystal" panel ---------------------------------------- */
+
+static uint32_t glassScale(uint32_t colour, int numerator, int denominator) {
+	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
+	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
+	uint32_t b = (((colour >> 16) & 0xff) * numerator) / denominator;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
+
+/*
+ * XMB-style crystal tile - see renderer.h.
+ *
+ * The GPU has no alpha channel, no rounded primitives and no blur, so the
+ * glassy look is assembled from flat quads:
+ *
+ *   - the body is drawn with blend=true, which uses the semi-transparent
+ *     blend mode, so the wallpaper shows through and the tile reads as glass
+ *     rather than a painted block;
+ *   - a lighter band across the top is the specular sheen. Two bands of
+ *     slightly different brightness approximate a vertical gradient, which
+ *     the renderer cannot do directly (drawGradientRectH is horizontal only);
+ *   - a bright 1px edge along the top and left plus a dark one along the
+ *     bottom and right is a standard bevel, and is what gives the 3D lift;
+ *   - the top and bottom rows are inset by one pixel, which reads as a
+ *     rounded corner at these sizes for the cost of two extra quads.
+ *
+ * `tint` wants to be DARK. Blending adds the background on top and the sheen
+ * and bevel lighten it further, so a mid-brightness tint comes out washed
+ * rather than glassy. xmbGetAccentColor() already returns a suitable value.
+ */
+void drawGlassPanel(
+	RenderContext *ctx, int x, int y, int w, int h,
+	uint32_t tint, uint32_t glow
+) {
+	if (w <= 2 || h <= 2)
+		return;
+
+	if (glow) {
+		/* Outward bloom: larger and dimmer with each ring, blended so they
+		 * accumulate instead of replacing what is underneath. */
+		drawRect(ctx, x - 4, y - 4, w + 8, h + 8, glassScale(glow, 1, 4), true);
+		drawRect(ctx, x - 3, y - 3, w + 6, h + 6, glassScale(glow, 1, 2), true);
+		drawRect(ctx, x - 2, y - 2, w + 4, h + 4, glow, true);
+	}
+
+	/* Body, with the top and bottom rows inset to round the corners. */
+	drawRect(ctx, x,     y + 1,     w,     h - 2, tint, true);
+	drawRect(ctx, x + 1, y,         w - 2, 1,     tint, true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1,     tint, true);
+
+	/* Specular sheen across the top, two steps for a soft falloff. */
+	drawRect(ctx, x + 1, y + 1,         w - 2, h / 3, glassScale(tint, 9, 4), true);
+	drawRect(ctx, x + 1, y + 1 + h / 3, w - 2, h / 6, glassScale(tint, 6, 4), true);
+
+	/* Bevel: light from the top left, shadow to the bottom right. */
+	uint32_t lit   = glassScale(tint, 5, 2);
+	uint32_t shade = glassScale(tint, 1, 3);
+
+	drawRect(ctx, x + 1,     y,         w - 2, 1,     lit,   true);
+	drawRect(ctx, x,         y + 1,     1,     h - 2, lit,   true);
+	drawRect(ctx, x + 1,     y + h - 1, w - 2, 1,     shade, true);
+	drawRect(ctx, x + w - 1, y + 1,     1,     h - 2, shade, true);
+}

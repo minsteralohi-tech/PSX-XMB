@@ -495,6 +495,81 @@ void xmbGetIconGradient(uint32_t *top, uint32_t *bot) {
 	}
 }
 
+
+/* --- UI accent colour --------------------------------------------------- */
+
+/*
+ * Dominant hue of each theme, as plain RGB.
+ *
+ * Screens that draw their own "crystal" tiles - the memory card manager's
+ * block grid, the CD player's track list - ask for this so they follow the
+ * wallpaper instead of being permanently blue. The values are the colour each
+ * background actually reads as on screen, not a guess: Nebula 3's corona and
+ * roaming planets are orange, the Cosmos family is violet, the PS5 themes are
+ * warm amber, the PS4 ones deep blue.
+ *
+ * Index 0 ("Default") is the only theme the user can recolour, via the palette
+ * picker, so it is handled separately below and this row is never read.
+ *
+ * Same order as xmbThemeNames[].
+ */
+static const uint8_t themeAccents[XMB_THEME_COUNT][3] = {
+	{  90, 130, 235},   // Default - unused, see xmbGetAccentColor()
+	{  90, 130, 235},   // Gouraud Waves + Sparkle - XMB blue
+	{  60, 210, 180},   // Aurora - green-teal curtains
+	{  80, 150, 240},   // Parallax Ribbons - blue ribbons
+	{ 150,  90, 225},   // Space Cosmos - violet nebula
+	{ 150,  90, 225},   // Space Cosmos 3D++1
+	{ 165, 105, 235},   // Space Cosmos 3D++2
+	{ 245, 175,  90},   // PS5 Sparkle - warm amber
+	{ 245, 165,  70},   // PS5 Spotlight - amber spotlight
+	{ 245, 140,  45},   // Nebula 3 - orange corona
+	{  70, 130, 245},   // PS4 - deep blue silk
+	{  80, 140, 250},   // PS4 v2 - blue glyphs
+	{ 190, 190, 200}    // TEST logo - neutral grey
+};
+
+/*
+ * Two colours for a translucent "crystal" tile: a dark base tint and a bright
+ * glow for the selected state.
+ *
+ * The base is deliberately dark. Callers draw it with blending enabled and
+ * then lighten it themselves for the sheen and bevel, so handing back the
+ * accent at full brightness comes out washed rather than glassy.
+ */
+void xmbGetAccentColor(uint32_t *base, uint32_t *glow) {
+	uint8_t r, g, b;
+
+	if (xmbThemeIndex == XMB_PALETTE_THEME_INDEX) {
+		// The one theme with a user-selectable palette: follow the wave
+		// crest, which is what gives that background its character.
+		const XMBPalette *pal = currentPalette();
+		r = pal->crestB[0];
+		g = pal->crestB[1];
+		b = pal->crestB[2];
+	} else {
+		uint8_t i = xmbThemeIndex;
+		if (i >= XMB_THEME_COUNT)
+			i = 0;
+		r = themeAccents[i][0];
+		g = themeAccents[i][1];
+		b = themeAccents[i][2];
+	}
+
+	if (base)
+		*base = gp0_rgb(r * 3 / 10, g * 3 / 10, b * 3 / 10);
+
+	if (glow) {
+		// Bright, and pushed toward white so the bloom reads as light
+		// rather than as more of the same colour.
+		int gr = r / 2 + 128, gg = g / 2 + 128, gb = b / 2 + 128;
+		if (gr > 255) gr = 255;
+		if (gg > 255) gg = 255;
+		if (gb > 255) gb = 255;
+		*glow = gp0_rgb((uint8_t) gr, (uint8_t) gg, (uint8_t) gb);
+	}
+}
+
 /* --- wave style --------------------------------------------------------- */
 
 uint8_t xmbWaveStyle = 0;

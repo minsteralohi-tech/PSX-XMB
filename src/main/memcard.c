@@ -930,33 +930,16 @@ static void drawIconTexture(
 #define MC_GRID_Y     40
 #define MC_TITLE_Y    16
 
-/* Selection bloom, 0xBBGGRR: a pale XMB blue-white. */
-#define MC_GLOW 0xffd8a0
-
-
 /*
- * XMB-style "crystal" cell.
- *
- * The PS1 GPU has no alpha channel, no rounded primitives and no blur, so the
- * glassy look is faked out of flat quads:
- *
- *   - the body is drawn with blend=true, which uses the semi-transparent
- *     blend mode, so the wallpaper shows through and the tile reads as glass
- *     rather than a painted block;
- *   - a lighter band across the top half is the specular sheen. Two bands of
- *     slightly different brightness approximate a vertical gradient, which
- *     the renderer cannot do directly (drawGradientRectH is horizontal only);
- *   - a bright 1px edge along the top and left plus a dark one along the
- *     bottom and right is a standard bevel, and is what gives the 3D lift;
- *   - the top and bottom rows are inset by one pixel, which reads as a
- *     rounded corner at this size and costs two extra quads.
- *
- * Selection is a glow rather than an outline: three progressively larger and
- * fainter blended rings behind the tile, so it blooms outward instead of
- * getting a hard orange border.
- *
- * Colours are 0xBBGGRR to match the GPU's own word order.
+ * The tile tints follow the current theme's dominant colour, so the grid
+ * matches the wallpaper instead of being permanently blue - Nebula 3 gives
+ * orange crystal, the Cosmos themes violet, and so on. Fetched once per frame
+ * in drawMemoryCardManager() rather than per cell.
  */
+static uint32_t mcAccent = 0x702810;   /* 0xBBGGRR, replaced each frame */
+static uint32_t mcGlow   = 0xffd8a0;
+
+/* Local shade helper; the tile itself is drawn by drawGlassPanel(). */
 static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
 	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
@@ -969,41 +952,6 @@ static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	return (b << 16) | (g << 8) | r;
 }
 
-static void drawGlassCell(
-	RenderContext *ctx,
-	int            x,
-	int            y,
-	int            w,
-	int            h,
-	uint32_t       tint,
-	bool           selected
-) {
-	if (selected) {
-		/* Outward bloom: larger and dimmer with each ring. Drawn blended so
-		 * the rings accumulate rather than replacing what is underneath. */
-		drawRect(ctx, x - 4, y - 4, w + 8, h + 8, mcScale(MC_GLOW, 1, 4), true);
-		drawRect(ctx, x - 3, y - 3, w + 6, h + 6, mcScale(MC_GLOW, 1, 2), true);
-		drawRect(ctx, x - 2, y - 2, w + 4, h + 4, MC_GLOW, true);
-	}
-
-	/* Body, with the top and bottom rows inset to round the corners. */
-	drawRect(ctx, x,     y + 1, w,     h - 2, tint, true);
-	drawRect(ctx, x + 1, y,     w - 2, 1,     tint, true);
-	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, tint, true);
-
-	/* Specular sheen across the top, two steps for a soft falloff. */
-	drawRect(ctx, x + 1, y + 1,     w - 2, h / 3,     mcScale(tint, 9, 4), true);
-	drawRect(ctx, x + 1, y + 1 + h / 3, w - 2, h / 6, mcScale(tint, 6, 4), true);
-
-	/* Bevel: light from the top left, shadow to the bottom right. */
-	uint32_t lit   = mcScale(tint, 5, 2);
-	uint32_t shade = mcScale(tint, 1, 3);
-
-	drawRect(ctx, x + 1, y,         w - 2, 1, lit,   true);
-	drawRect(ctx, x,     y + 1,     1, h - 2, lit,   true);
-	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, shade, true);
-	drawRect(ctx, x + w - 1, y + 1, 1, h - 2, shade, true);
-}
 
 typedef enum {
 	MENU_OPTION_COPY,
@@ -1468,6 +1416,10 @@ void runMemoryCardManager(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
+		// Follow the wallpaper: picked up every frame so switching theme in
+		// Settings and coming back here recolours the grid immediately.
+		xmbGetAccentColor(&mcAccent, &mcGlow);
+
 		printString(ctx, 16, MC_TITLE_Y, 0x808080, "MEMORY CARD MANAGER");
 
 		if (!haveAnyCard) {
@@ -1481,6 +1433,8 @@ void runMemoryCardManager(
 
 				if (!present[slot]) {
 					printString(ctx, baseX, MC_GRID_Y, 0x808080, "(empty)");
+					printString(ctx, baseX, MC_GRID_Y + 14, 0x505050, "START");
+					printString(ctx, baseX, MC_GRID_Y + 26, 0x505050, "to scan");
 					continue;
 				}
 
@@ -1492,26 +1446,31 @@ void runMemoryCardManager(
 
 					const DirectoryEntry *entry = &entries[slot][i];
 
-					// Tints are deliberately dark: drawGlassCell() lightens
+					// Tints are deliberately dark: drawGlassPanel() lightens
 					// them for the sheen and the bevel, and blending lets the
 					// wallpaper through, so a mid-brightness tint here comes
 					// out washed rather than glassy. 0xBBGGRR.
+					// Occupied and free blocks are the theme accent at two
+					// brightnesses, so the grid reads as one material. Deleted
+					// keeps a fixed amber and unreadable a neutral grey: those
+					// two carry meaning, and tinting them would make them
+					// indistinguishable from "used" under a warm theme.
 					uint32_t color;
 					if (!entry->read)
-						color = 0x1a1a1a;   // unreadable: neutral grey
+						color = 0x1a1a1a;                  // unreadable
 					else if (entry->used)
-						color = 0x702810;   // occupied: XMB blue
+						color = mcAccent;                  // occupied
 					else if (entry->deleted)
-						color = 0x184048;   // deleted: amber
+						color = 0x184048;                  // deleted: amber
 					else
-						color = 0x281808;   // free: dim steel
+						color = mcScale(mcAccent, 2, 5);   // free: dimmer
 
 					bool isSelected = (slot == activeSlot) && (i == selected);
 					bool willShowIcon = entry->used && gridIconValid[slot][i];
 
-					drawGlassCell(
+					drawGlassPanel(
 						ctx, x, y, MC_CELL_W - 3, MC_CELL_H - 3,
-						color, isSelected
+						color, isSelected ? mcGlow : 0
 					);
 
 					if (willShowIcon) {
