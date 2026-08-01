@@ -1214,8 +1214,17 @@ void runMemoryCardManager(
 				}
 
 				if (pressed & PAD_BTN_CROSS) {
-					stage        = STAGE_MENU;
-					menuSelected = MENU_OPTION_COPY;
+					// Only offer the menu for a block that has something in
+					// it. Every option except Format acts on a save, and
+					// Format is reachable from any used block on the card, so
+					// opening this on a free slot only ever led to a dead end.
+					const DirectoryEntry *cell =
+						&entries[activeSlot][selected];
+
+					if (cell->read && (cell->used || cell->deleted)) {
+						stage        = STAGE_MENU;
+						menuSelected = MENU_OPTION_COPY;
+					}
 				}
 			} else if (stage == STAGE_MENU) {
 				bool showClean = entries[activeSlot][selected].deleted;
@@ -1230,7 +1239,7 @@ void runMemoryCardManager(
 					if (!showClean && (menuSelected == MENU_OPTION_CLEAR))
 						menuSelected = (menuSelected + MENU_NUM_OPTIONS - 1) % MENU_NUM_OPTIONS;
 				}
-				if (pressed & PAD_BTN_TRIANGLE)
+				if (pressed & PAD_BTN_CIRCLE)
 					stage = STAGE_BROWSING;
 				if (pressed & PAD_BTN_CROSS) {
 					if (menuSelected == MENU_OPTION_CANCEL) {
@@ -1290,7 +1299,7 @@ void runMemoryCardManager(
 					}
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				if (pressed & PAD_BTN_TRIANGLE)
+				if (pressed & PAD_BTN_CIRCLE)
 					stage = STAGE_BROWSING;
 				if (pressed & PAD_BTN_CROSS) {
 					stage = STAGE_BROWSING;
@@ -1521,14 +1530,24 @@ void runMemoryCardManager(
 				bool showClean = sel && sel->deleted;
 
 				const char *titleLine =
-					"Options   " CH_PS1_CROSS_BUTTON ": OK   "
-					CH_PS1_TRIANGLE_BUTTON ": Back";
+					"Options  " CH_PS1_CROSS_BUTTON ": OK  "
+					CH_PS1_CIRCLE_BUTTON ": Back";
 
-				int boxWidth = getStringWidth(titleLine) + 16;
+				// Wide enough for the title and a small margin past "Back",
+				// rather than the old fixed-ish width that left a large empty
+				// gap down the right-hand side.
+				int boxWidth = getStringWidth(titleLine) + 14;
 				int boxX     = (320 - boxWidth) / 2;
+				int boxH     = 106;
 
-				drawRect(ctx, boxX, 50, boxWidth, 106, 0x282828, false);
-				drawRect(ctx, boxX, 50, boxWidth, 16, 0x505050, false);
+				// Same crystal material as the block grid and the CD player,
+				// so the popup belongs to the screen it sits on. No glow: it
+				// is a container, not a selectable item.
+				drawGlassPanel(ctx, boxX, 50, boxWidth, boxH, mcAccent, 0);
+
+				// Title bar, a brighter band of the same tint.
+				drawRect(ctx, boxX + 1, 51, boxWidth - 2, 15,
+				         mcScale(mcAccent, 2, 1), true);
 				printString(ctx, boxX + 8, 54, 0xffffff, titleLine);
 
 				const char *labels[MENU_NUM_OPTIONS];
@@ -1550,8 +1569,11 @@ void runMemoryCardManager(
 					drawRow++;
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				drawRect(ctx, 70, 85, 200, 60, 0x282828, false);
-				drawRect(ctx, 70, 85, 200, 16, 0xe04040, false);
+				// Crystal body like the options popup, but the title band
+				// stays red: this dialog destroys data and should not blend
+				// into the theme.
+				drawGlassPanel(ctx, 70, 85, 200, 60, mcAccent, 0);
+				drawRect(ctx, 71, 86, 198, 15, 0x2020c0, true);
 				if (menuSelected == MENU_OPTION_FORMAT) {
 					printString(ctx, 78, 89, 0xffffff, "Format this card?");
 					printString(ctx, 78, 107, 0xffffff, "Erases ALL saves!");
@@ -1563,7 +1585,9 @@ void runMemoryCardManager(
 				} else {
 					printString(ctx, 78, 89, 0xffffff, "Delete this save?");
 				}
-				printString(ctx, 78, 125, 0xffffff, "X: confirm   Triangle: cancel");
+				printString(ctx, 78, 125, 0xffffff,
+					CH_PS1_CROSS_BUTTON ": confirm   "
+					CH_PS1_CIRCLE_BUTTON ": cancel");
 			} else {
 				printString(ctx, 16, 202, 0x505050, "D-PAD select   X: options");
 				if (present[0] && present[1])

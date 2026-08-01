@@ -38,6 +38,12 @@ __attribute__((noreturn)) void launchUniROM(void);
 // copying a redundant second UniROM image into RAM. Use this - not
 // launchUniROM() - when a UniROM cart is what's actually installed; see
 // unirom_launch.c for why the two do not mix safely. Does not return.
+/*
+ * NOTE: no caller at present. The "UniROM (cart installed)" menu entry was
+ * removed - Tools -> UniROM 8.0 covers both the cart and the RAM-resident
+ * case now. This is kept because it is a working firmware-reset path and
+ * costs a few dozen bytes; wire it back up if a cart-specific entry returns.
+ */
 __attribute__((noreturn)) void returnToUniROMCart(void);
 
 #ifdef __cplusplus

@@ -58,7 +58,6 @@ typedef struct {
 /* Forward-declared local actions. */
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
-static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
@@ -99,7 +98,6 @@ static const XMBEntry hwItems[] = {
 	{ "Pad Tester",         9, runPadTest,         true },
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },
 	{ "UniROM 8.0",         8, xmbLaunchUniROM,    true },
-	{ "UniROM (cart installed)", 8, xmbReturnToUniROMCart, true },
 	{ "240p Test Suite",   6, xmbLaunch240pSuite, true },
 };
 
@@ -203,17 +201,6 @@ static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *
 	runUniROMLauncher(ctx, state, item);
 }
 
-/* For consoles that boot into this app THROUGH a real, physically-installed
- * UniROM cartridge: use this instead of "UniROM 8.0" above. That option
- * copies a second, independent UniROM image into RAM, which fights the
- * cart's own resident firmware (that's what was producing the RAM error -
- * see unirom_launch.c). This just hands control back the way a real
- * soft-reset would; the cart intercepts that at the hardware level and its
- * own menu comes back. */
-static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item) {
-	(void) ctx; (void) state; (void) item;
-	returnToUniROMCart();
-}
 
 /* --- drawing helpers ---------------------------------------------------- */
 

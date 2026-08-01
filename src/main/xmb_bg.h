@@ -50,7 +50,12 @@ typedef enum {
  * its label list at xmbThemeNames; drawXMBBackground() follows xmbThemeIndex
  * automatically, so switching the theme updates the background live.
  */
-#define XMB_THEME_COUNT 13
+/*
+ * "TEST logo" was removed from the picker; XMB_BG_TEST_LOGO and its drawer
+ * remain available via xmbBgSetStyle() for debugging, they are just not
+ * offered as a user theme any more.
+ */
+#define XMB_THEME_COUNT 12
 
 #ifdef __cplusplus
 extern "C" {

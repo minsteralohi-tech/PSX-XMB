@@ -208,6 +208,18 @@ static uint32_t glassScale(uint32_t colour, int numerator, int denominator) {
  *   - the top and bottom rows are inset by one pixel, which reads as a
  *     rounded corner at these sizes for the cost of two extra quads.
  *
+ * DISPLAY LIST BUDGET
+ * -------------------
+ * Eight packets per tile, 32 words with their chain links. The memory card
+ * manager draws 30 of them, so roughly 960 words on top of whatever the
+ * background costs, against a GPU_CHAIN_BUFFER_SIZE of 8192.
+ *
+ * This matters: allocateGP0Packet() silently drops packets once the chain is
+ * full, which shows up as parts of the screen flickering or vanishing rather
+ * than as a crash - it was doing exactly that under the two heaviest themes
+ * (Nebula 3 and PS4 v2) when the tile cost more. Adding layers here is not
+ * free; check the budget before doing it.
+ *
  * `tint` wants to be DARK. Blending adds the background on top and the sheen
  * and bevel lighten it further, so a mid-brightness tint comes out washed
  * rather than glassy. xmbGetAccentColor() already returns a suitable value.
@@ -221,7 +233,8 @@ void drawGlassPanel(
 
 	if (glow) {
 		/* Outward bloom: larger and dimmer with each ring, blended so they
-		 * accumulate instead of replacing what is underneath. */
+		 * accumulate instead of replacing what is underneath. Only ever drawn
+		 * for the one selected tile, so the cost is fixed. */
 		drawRect(ctx, x - 4, y - 4, w + 8, h + 8, glassScale(glow, 1, 4), true);
 		drawRect(ctx, x - 3, y - 3, w + 6, h + 6, glassScale(glow, 1, 2), true);
 		drawRect(ctx, x - 2, y - 2, w + 4, h + 4, glow, true);
@@ -232,9 +245,11 @@ void drawGlassPanel(
 	drawRect(ctx, x + 1, y,         w - 2, 1,     tint, true);
 	drawRect(ctx, x + 1, y + h - 1, w - 2, 1,     tint, true);
 
-	/* Specular sheen across the top, two steps for a soft falloff. */
-	drawRect(ctx, x + 1, y + 1,         w - 2, h / 3, glassScale(tint, 9, 4), true);
-	drawRect(ctx, x + 1, y + 1 + h / 3, w - 2, h / 6, glassScale(tint, 6, 4), true);
+	/* Specular sheen across the top. Two bands give a softer falloff, but
+	 * each one is another packet in the display list and this runs 30 times
+	 * on the memory card screen - see the note about the chain budget at the
+	 * top of this function. One band plus the bevel reads almost the same. */
+	drawRect(ctx, x + 1, y + 1, w - 2, h / 3, glassScale(tint, 9, 4), true);
 
 	/* Bevel: light from the top left, shadow to the bottom right. */
 	uint32_t lit   = glassScale(tint, 5, 2);

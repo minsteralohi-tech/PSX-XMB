@@ -54,8 +54,7 @@ const char *const xmbThemeNames[XMB_THEME_COUNT] = {
 	"PS5 Spotlight",
 	"Nebula 3",
 	"PS4",
-	"PS4 v2",
-	"TEST logo"
+	"PS4 v2"
 };
 static const XMBBgStyle themeStyles[XMB_THEME_COUNT] = {
 	XMB_BG_GOURAUD_PSP,
@@ -69,8 +68,7 @@ static const XMBBgStyle themeStyles[XMB_THEME_COUNT] = {
 	XMB_BG_PS5_SPOTLIGHT,
 	XMB_BG_NEBULA3,
 	XMB_BG_PS4,
-	XMB_BG_PS4_V2,
-	XMB_BG_TEST_LOGO
+	XMB_BG_PS4_V2
 };
 uint8_t xmbThemeIndex = 0;
 
@@ -525,8 +523,7 @@ static const uint8_t themeAccents[XMB_THEME_COUNT][3] = {
 	{ 245, 165,  70},   // PS5 Spotlight - amber spotlight
 	{ 245, 140,  45},   // Nebula 3 - orange corona
 	{  70, 130, 245},   // PS4 - deep blue silk
-	{  80, 140, 250},   // PS4 v2 - blue glyphs
-	{ 190, 190, 200}    // TEST logo - neutral grey
+	{  80, 140, 250}    // PS4 v2 - blue glyphs
 };
 
 /*
