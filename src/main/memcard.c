@@ -1571,8 +1571,15 @@ void runMemoryCardManager(
 				}
 			}
 
-			if (noticeTimer > 0)
-				printString(ctx, 16, panelY + 30, 0x1256e3, notice);
+			if (noticeTimer > 0) {
+				// Right-aligned on the same row as "Game ID", rather than
+				// stacked below the status block, where it overlapped the
+				// control hints at the bottom of the screen.
+				int noticeW = getStringWidth(notice);
+				printString(
+					ctx, 304 - noticeW, panelY + 24, 0x1256e3, notice
+				);
+			}
 
 			if (stage == STAGE_MENU) {
 				bool showClean = sel && sel->deleted;

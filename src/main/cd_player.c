@@ -244,6 +244,22 @@ static void applyReverbPreset(ReverbPreset preset) {
 	}
 }
 
+/*
+ * Layout. Title was at y=10, which a CRT's overscan clips on most sets - the
+ * same problem the memory card manager had. Moved to y=16 to match its safe
+ * margin, and everything below shifted/compressed to fit: the tail used to
+ * run to y=218, six pixels past where it is safe to put the last line.
+ */
+#define CD_TITLE_Y      16
+#define CD_GRID_Y       32
+#define CD_MORE_Y       114
+#define CD_TRACKTIME_Y  128
+#define CD_STATE_Y      140
+#define CD_VOLUME_Y     154
+#define CD_CONTROLS1_Y  172
+#define CD_CONTROLS2_Y  184
+#define CD_EXIT_HINT_Y  204
+
 #define GRID_COLS       5
 #define GRID_MAX_ROWS   4
 #define GRID_MAX_TRACKS (GRID_COLS * GRID_MAX_ROWS)
@@ -401,19 +417,19 @@ void runCDPlayer(
 		// Settings shows up here immediately.
 		xmbGetAccentColor(&cdAccent, &cdGlow);
 
-		printString(ctx, 16, 10, 0x808080, "CD MUSIC PLAYER");
+		printString(ctx, 16, CD_TITLE_Y, 0x808080, "CD MUSIC PLAYER");
 
 		if (!haveDisc) {
-			printString(ctx, 24, 44, 0x808080, "No disc / no tracks found");
-			printString(ctx, 24, 56, 0x808080, "Insert an audio CD or game disc");
-			printString(ctx, 24, 68, 0x505050, "(checking automatically...)");
+			printString(ctx, 24, CD_GRID_Y + 12, 0x808080, "No disc / no tracks found");
+			printString(ctx, 24, CD_GRID_Y + 24, 0x808080, "Insert an audio CD or game disc");
+			printString(ctx, 24, CD_GRID_Y + 36, 0x505050, "(checking automatically...)");
 		} else {
 			for (int t = 0; t < shownTracks; t++) {
 				int trackNum = firstTrack + t;
 				int col      = t % GRID_COLS;
 				int row      = t / GRID_COLS;
 				int x        = 24 + col * 52;
-				int y        = 26 + row * 20;
+				int y        = CD_GRID_Y + row * 20;
 
 				bool isCurrent = (trackNum == currentTrack);
 				bool isPlaying = isCurrent && (playState == CD_PLAYING);
@@ -442,14 +458,14 @@ void runCDPlayer(
 					line, sizeof(line), "(+%d more, use LEFT/RIGHT)",
 					lastTrack - GRID_MAX_TRACKS
 				);
-				printString(ctx, 24, 108, 0x505050, line);
+				printString(ctx, 24, CD_MORE_Y, 0x505050, line);
 			}
 
 			snprintf(
 				line, sizeof(line), "TRACK %02d/%02d  TIME %02d:%02d",
 				currentTrack, lastTrack, elapsedMin, elapsedSec
 			);
-			printString(ctx, 24, 122, 0xffffff, line);
+			printString(ctx, 24, CD_TRACKTIME_Y, 0xffffff, line);
 
 			const char *stateText;
 			switch (playState) {
@@ -457,25 +473,25 @@ void runCDPlayer(
 				case CD_PAUSED:  stateText = "|| PAUSED"; break;
 				default:         stateText = "[] STOPPED"; break;
 			}
-			printString(ctx, 24, 134, 0x1256e3, stateText);
+			printString(ctx, 24, CD_STATE_Y, 0x1256e3, stateText);
 
 			snprintf(
 				line, sizeof(line), "VOLUME %3d%%   REVERB: %s",
 				(cdVolume * 100) / CD_VOL_MAX, REVERB_NAMES[reverbPreset]
 			);
-			printString(ctx, 24, 148, 0xffffff, line);
+			printString(ctx, 24, CD_VOLUME_Y, 0xffffff, line);
 
 			printString(
-				ctx, 16, 172, 0x505050,
+				ctx, 16, CD_CONTROLS1_Y, 0x505050,
 				CH_PS1_CROSS_BUTTON " PLAY   "
 				CH_PS1_SQUARE_BUTTON " PAUSE   "
 				CH_PS1_CIRCLE_BUTTON " STOP   "
 				CH_PS1_TRIANGLE_BUTTON " REVERB"
 			);
-			printString(ctx, 16, 184, 0x505050, "D-PAD select   R2/L2 volume");
+			printString(ctx, 16, CD_CONTROLS2_Y, 0x505050, "D-PAD select   R2/L2 volume");
 		}
 
-		printString(ctx, 16, 218, 0x505050, "START+SELECT: return to menu");
+		printString(ctx, 16, CD_EXIT_HINT_Y, 0x505050, "START+SELECT: return to menu");
 
 		endFrame(ctx);
 	}

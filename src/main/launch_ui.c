@@ -22,6 +22,7 @@
 #include "main/defs.h"
 #include "main/font.h"
 #include "main/launch_ui.h"
+#include "main/xmb_menu.h"
 #include "main/sound.h"
 #include "main/xmb_bg.h"
 
@@ -167,6 +168,7 @@ static void drawDialogCard(
  */
 static int confirmHandoff(
 	RenderContext *ctx,
+	UIState       *state,
 	const char    *title
 ) {
 	const char *line1 = "You are exiting the PSX Dashboard.";
@@ -211,7 +213,11 @@ static int confirmHandoff(
 		}
 
 		beginFrame(ctx);
-		drawXMBBackground(ctx);
+
+		// The menu itself, so the dialog reads as an overlay on top of a
+		// live screen rather than as a separate page - Circle visibly
+		// returns to exactly where the user was.
+		renderXMB(ctx, state);
 
 		// Follow the wallpaper, same as the memory card tiles.
 		xmbGetAccentColor(&accent, &glow);
@@ -221,7 +227,9 @@ static int confirmHandoff(
 		printString(ctx, boxX + 10, boxY + 10, 0xffffff, title);
 		printString(ctx, boxX + 10, boxY + 34, 0xffffff, line1);
 		printString(ctx, boxX + 10, boxY + 50, 0xffffff, line2);
-		printString(ctx, boxX + 10, boxY + 72, 0x1256e3, keys);
+		// Plain white, not the theme accent: OK/Back are the same everywhere
+		// in the dashboard and should not shift colour with the wallpaper.
+		printString(ctx, boxX + 10, boxY + 72, 0xffffff, keys);
 
 		endFrame(ctx);
 	}
@@ -235,6 +243,7 @@ static int confirmHandoff(
  */
 static void runLaunchScreen(
 	RenderContext      *ctx,
+	UIState            *state,
 	const char         *title,
 	const uint8_t      *exe,
 	const LaunchConfig *config
@@ -253,7 +262,7 @@ static void runLaunchScreen(
 	if (config->biosExec)
 		(void) planUseBiosExec(&plan, 1);
 
-	if (!confirmHandoff(ctx, title))
+	if (!confirmHandoff(ctx, state, title))
 		return;
 
 	/* Never returns. */
@@ -265,11 +274,11 @@ void runSIOLoader(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
 	runLaunchScreen(
 		ctx,
+		state,
 		"SIO LOADER",
 		sioLoaderExe,
 		&SIO_LOADER_CONFIG
@@ -281,11 +290,11 @@ void run240pSuite(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
 	runLaunchScreen(
 		ctx,
+		state,
 		"240P TEST SUITE",
 		suite240pExe,
 		&SUITE240P_CONFIG
@@ -297,11 +306,11 @@ void runUniROMLauncher(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
 	runLaunchScreen(
 		ctx,
+		state,
 		"UNIROM 8.0",
 		uniromExe,
 		&UNIROM_CONFIG

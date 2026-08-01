@@ -506,11 +506,17 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		}
 	}
 
-	// footer hint
-	printString(ctx, 12, 214, TEXT_DIM,
-		CH_PS1_DPAD_X " Category   "
-		CH_PS1_DPAD_Y " Item   "
-		CH_PS1_CROSS_BUTTON " Select");
+	// footer hint, right-aligned rather than pinned to the left edge.
+	{
+		const char *hint =
+			CH_PS1_DPAD_X " Category   "
+			CH_PS1_DPAD_Y " Item   "
+			CH_PS1_CROSS_BUTTON " Select";
+
+		printString(
+			ctx, 308 - getStringWidth(hint), 214, TEXT_DIM, hint
+		);
+	}
 }
 
 void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {

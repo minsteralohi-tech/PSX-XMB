@@ -43,7 +43,7 @@ static uint32_t   xmbFrame       = 0;
 /* User-facing theme picker: names shown in the menu, and the style each one
  * maps to. Keep these two arrays in the same order, XMB_THEME_COUNT long. */
 const char *const xmbThemeNames[XMB_THEME_COUNT] = {
-	"Default",
+	"Default - Customize",
 	"Gouraud Waves + Sparkle",
 	"Aurora",
 	"Parallax Ribbons",
