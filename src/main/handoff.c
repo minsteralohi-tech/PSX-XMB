@@ -17,7 +17,32 @@
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
 static void quiesceCommon(void) {
-	// 0. Put both serial buses back to a neutral state.
+	// 0. Quiet the CD-ROM controller.
+	//
+	//    Entering the CD player and coming back leaves the drive spinning,
+	//    the audio path live and - the part that actually breaks things - an
+	//    interrupt flag latched in the controller. UniROM does its own CD-ROM
+	//    init on start-up and waits on that controller; handed one that is
+	//    mid-response with an unacknowledged IRQ, it waits forever. That is
+	//    the "black screen, but only if you visited the CD player first"
+	//    report, and it is why launching UniROM straight from the menu was
+	//    always fine.
+	//
+	//    Raw register pokes rather than cd_player.c's helpers: those wait for
+	//    a response, and nothing in this function may block. Stop the drive,
+	//    disable CD interrupts, acknowledge anything pending.
+	{
+		volatile uint8_t *cd = (volatile uint8_t *) 0x1f801800;
+
+		cd[0] = 0;      // index 0: command/parameter port
+		cd[1] = 0x08;   // CdlStop, fire and forget
+		cd[0] = 1;      // index 1: interrupt enable / flag
+		cd[2] = 0x00;   // no CD interrupts
+		cd[3] = 0x07;   // acknowledge INT1..INT3
+		cd[0] = 0;
+	}
+
+	// 1. Put both serial buses back to a neutral state.
 	//
 	//    main.c calls initSerialIO(115200) and initControllerBus(), so SIO1
 	//    is configured for 115200 8N2 and SIO0 is set up for this dashboard's
