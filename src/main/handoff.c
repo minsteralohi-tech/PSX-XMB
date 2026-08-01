@@ -17,21 +17,24 @@
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
 static void quiesceCommon(void) {
-	// 0. Quiet the CD-ROM controller.
+	// 0. Reset the CD-ROM controller.
 	//
-	//    Visiting the CD player and coming back leaves the drive spinning or
-	//    paused with the audio path live, and UniROM waits on that controller
-	//    during its own start-up - hence "black screen, but only if you went
-	//    into the CD player first". Launching straight from the menu was
-	//    always fine because the drive had never been started.
+	//    Visiting the CD player and coming back leaves the controller in a
+	//    state UniROM will not start from - "black screen, but only if you
+	//    went into the CD player first". Launching straight from the menu is
+	//    fine because the drive was never started.
 	//
-	//    The first attempt at this just wrote CdlStop and acknowledged, and
-	//    it did not work: the command byte is dropped if the controller is
-	//    still busy with the previous one, so the drive kept playing. This
-	//    version waits for BUSYSTS to clear first, then waits for the stop to
-	//    be acknowledged, then clears the FIFOs.
+	//    Two earlier attempts sent CdlStop (0x08) and failed. CdlStop only
+	//    halts playback; it does not clear the controller's mode, its FIFOs,
+	//    or the BIOS CD driver's idea of what is going on - and cd_player.c
+	//    drives these registers directly, behind the BIOS's back, so that
+	//    idea is already stale by the time we get here.
 	//
-	//    Every wait is bounded. cd_player.c's helpers spin forever on
+	//    CdlInit (0x0A) is the real reset: it aborts whatever is in flight,
+	//    restores the default mode and stops the motor, which is the state a
+	//    freshly booted program expects to find.
+	//
+	//    Every wait is bounded. cd_player.c's own helpers spin forever on
 	//    BUSYSTS, which is fine while the dashboard is running and completely
 	//    unacceptable here - a controller that never goes idle must not take
 	//    the hand-off down with it.
@@ -39,29 +42,45 @@ static void quiesceCommon(void) {
 		volatile uint8_t *cd = (volatile uint8_t *) 0x1f801800;
 		unsigned guard;
 
-		cd[0] = 0;                                  // index 0
+		// Clear anything outstanding first, or the command below is dropped.
+		cd[0] = 1;                                   // index 1
+		cd[3] = 0x1f;                                // ack INT1..INT5
+		cd[3] = 0x40;                                // reset the parameter FIFO
+		cd[2] = 0x00;                                // disable CD interrupts
+		cd[0] = 0;                                   // index 0
 
 		guard = 0x100000;
-		while ((cd[0] & 0x80) && --guard)            // BUSYSTS
+		while ((cd[0] & 0x80) && --guard)             // BUSYSTS
 			;
 
-		cd[0] = 1;                                  // index 1
-		cd[3] = 0x1f;                               // ack INT1..INT5
-		cd[3] = 0x40;                               // reset the parameter FIFO
-		cd[2] = 0x00;                               // disable CD interrupts
-		cd[0] = 0;
+		cd[1] = 0x0a;                                // CdlInit
 
-		cd[1] = 0x08;                               // CdlStop
+		// CdlInit answers INT3 and then INT2 when the reset completes. Poll
+		// the interrupt flag rather than BUSYSTS: BUSYSTS only covers the
+		// parameter transfer, and can read idle while the reset is still
+		// running.
+		for (int phase = 0; phase < 2; phase++) {
+			guard = 0x400000;
 
-		// Let the stop land. It answers INT3 first and INT2 once the motor
-		// has actually spun down; we only need the controller to reach idle.
-		guard = 0x400000;
-		while ((cd[0] & 0x80) && --guard)
-			;
+			for (;;) {
+				cd[0] = 1;
+				uint8_t flags = cd[3] & 0x07;
+				cd[0] = 0;
+
+				if (flags)
+					break;
+
+				if (!--guard)
+					break;
+			}
+
+			cd[0] = 1;
+			cd[3] = 0x1f;                            // acknowledge it
+			cd[0] = 0;
+		}
 
 		cd[0] = 1;
-		cd[3] = 0x1f;                               // ack whatever it raised
-		cd[3] = 0x40;
+		cd[3] = 0x40;                                // FIFOs clear
 		cd[2] = 0x00;
 		cd[0] = 0;
 	}

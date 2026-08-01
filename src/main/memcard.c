@@ -1557,7 +1557,7 @@ void runMemoryCardManager(
 			}
 
 			if (noticeTimer > 0)
-				printString(ctx, 16, panelY + 30, 0x1256e3, notice);
+				printString(ctx, 16, panelY + 30, mcScale(mcAccent, 7, 2), notice);
 
 			if (stage == STAGE_MENU) {
 				bool showClean = sel && sel->deleted;
@@ -1601,7 +1601,9 @@ void runMemoryCardManager(
 						continue;
 					printString(
 						ctx, boxX + 8, 74 + drawRow * 16,
-						(i == menuSelected) ? 0x1256e3 : 0xffffff,
+						(i == menuSelected)
+							? mcScale(mcAccent, 7, 2)   // light tint of the
+							: 0xffffff,                 // theme accent
 						labels[i]
 					);
 					drawRow++;
