@@ -26,7 +26,17 @@
 // silently corrupting memory in release builds (no assert), which showed up as
 // DuckStation crashes and full console resets on real hardware. 4096 gives
 // comfortable headroom for the menu + any background + the upcoming icon sheet.
-#define GPU_CHAIN_BUFFER_SIZE 4096
+/*
+ * Words per display list. Two of these are allocated (double buffered), so
+ * this costs GPU_CHAIN_BUFFER_SIZE * 4 * 2 bytes of main RAM.
+ *
+ * Raised from 4096: the heaviest backgrounds (Nebula 3, PS4 v2) combined with
+ * a screen that draws many translucent tiles of its own - the memory card
+ * manager, the CD player track list - exceeded it, and allocateGP0Packet()
+ * responds by dropping packets. The symptom is flickering or missing text at
+ * the bottom of the screen, because text is submitted last.
+ */
+#define GPU_CHAIN_BUFFER_SIZE 8192
 
 typedef struct {
 	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
