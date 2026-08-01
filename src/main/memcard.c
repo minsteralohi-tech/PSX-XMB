@@ -912,9 +912,98 @@ static void drawIconTexture(
 #define MC_CELL_W 24
 #define MC_CELL_H 24
 
-#define MC_SLOT0_X 16
-#define MC_SLOT1_X 168
-#define MC_GRID_Y  30
+/*
+ * Layout.
+ *
+ * The two 3-wide grids are centred as a pair rather than pinned to the left,
+ * and the whole screen starts lower down: the title used to sit at y=8, which
+ * a CRT's overscan clips on most sets. 16px of margin on each edge is the
+ * usual safe area for 320x240.
+ *
+ *   grid pair width = 2 * (3 * 24) + 40 gap = 184
+ *   left margin     = (320 - 184) / 2       = 68
+ */
+#define MC_GRID_W     (MC_GRID_COLS * MC_CELL_W)   /* 72  */
+#define MC_SLOT_GAP   40
+#define MC_SLOT0_X    ((320 - (2 * MC_GRID_W + MC_SLOT_GAP)) / 2)
+#define MC_SLOT1_X    (MC_SLOT0_X + MC_GRID_W + MC_SLOT_GAP)
+#define MC_GRID_Y     40
+#define MC_TITLE_Y    16
+
+/* Selection bloom, 0xBBGGRR: a pale XMB blue-white. */
+#define MC_GLOW 0xffd8a0
+
+
+/*
+ * XMB-style "crystal" cell.
+ *
+ * The PS1 GPU has no alpha channel, no rounded primitives and no blur, so the
+ * glassy look is faked out of flat quads:
+ *
+ *   - the body is drawn with blend=true, which uses the semi-transparent
+ *     blend mode, so the wallpaper shows through and the tile reads as glass
+ *     rather than a painted block;
+ *   - a lighter band across the top half is the specular sheen. Two bands of
+ *     slightly different brightness approximate a vertical gradient, which
+ *     the renderer cannot do directly (drawGradientRectH is horizontal only);
+ *   - a bright 1px edge along the top and left plus a dark one along the
+ *     bottom and right is a standard bevel, and is what gives the 3D lift;
+ *   - the top and bottom rows are inset by one pixel, which reads as a
+ *     rounded corner at this size and costs two extra quads.
+ *
+ * Selection is a glow rather than an outline: three progressively larger and
+ * fainter blended rings behind the tile, so it blooms outward instead of
+ * getting a hard orange border.
+ *
+ * Colours are 0xBBGGRR to match the GPU's own word order.
+ */
+static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
+	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
+	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
+	uint32_t b = (((colour >> 16) & 0xff) * numerator) / denominator;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
+
+static void drawGlassCell(
+	RenderContext *ctx,
+	int            x,
+	int            y,
+	int            w,
+	int            h,
+	uint32_t       tint,
+	bool           selected
+) {
+	if (selected) {
+		/* Outward bloom: larger and dimmer with each ring. Drawn blended so
+		 * the rings accumulate rather than replacing what is underneath. */
+		drawRect(ctx, x - 4, y - 4, w + 8, h + 8, mcScale(MC_GLOW, 1, 4), true);
+		drawRect(ctx, x - 3, y - 3, w + 6, h + 6, mcScale(MC_GLOW, 1, 2), true);
+		drawRect(ctx, x - 2, y - 2, w + 4, h + 4, MC_GLOW, true);
+	}
+
+	/* Body, with the top and bottom rows inset to round the corners. */
+	drawRect(ctx, x,     y + 1, w,     h - 2, tint, true);
+	drawRect(ctx, x + 1, y,     w - 2, 1,     tint, true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, tint, true);
+
+	/* Specular sheen across the top, two steps for a soft falloff. */
+	drawRect(ctx, x + 1, y + 1,     w - 2, h / 3,     mcScale(tint, 9, 4), true);
+	drawRect(ctx, x + 1, y + 1 + h / 3, w - 2, h / 6, mcScale(tint, 6, 4), true);
+
+	/* Bevel: light from the top left, shadow to the bottom right. */
+	uint32_t lit   = mcScale(tint, 5, 2);
+	uint32_t shade = mcScale(tint, 1, 3);
+
+	drawRect(ctx, x + 1, y,         w - 2, 1, lit,   true);
+	drawRect(ctx, x,     y + 1,     1, h - 2, lit,   true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, shade, true);
+	drawRect(ctx, x + w - 1, y + 1, 1, h - 2, shade, true);
+}
 
 typedef enum {
 	MENU_OPTION_COPY,
@@ -1072,7 +1161,7 @@ void runMemoryCardManager(
 			// first completed load), not the periodic refresh check.
 			beginFrame(ctx);
 			drawXMBBackground(ctx);
-			printString(ctx, 16, 8, 0x808080, "MEMORY CARD MANAGER");
+			printString(ctx, 16, MC_TITLE_Y, 0x808080, "MEMORY CARD MANAGER");
 			char loadingLine[32];
 			snprintf(loadingLine, sizeof(loadingLine), "Reading slot %d...", slot + 1);
 			printString(ctx, 24, 100, 0xffffff, loadingLine);
@@ -1379,7 +1468,7 @@ void runMemoryCardManager(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
-		printString(ctx, 16, 8, 0x808080, "MEMORY CARD MANAGER");
+		printString(ctx, 16, MC_TITLE_Y, 0x808080, "MEMORY CARD MANAGER");
 
 		if (!haveAnyCard) {
 			printString(ctx, 24, 40, 0x808080, "No card detected in either slot");
@@ -1402,37 +1491,32 @@ void runMemoryCardManager(
 					int y   = MC_GRID_Y + row * MC_CELL_H;
 
 					const DirectoryEntry *entry = &entries[slot][i];
+
+					// Tints are deliberately dark: drawGlassCell() lightens
+					// them for the sheen and the bevel, and blending lets the
+					// wallpaper through, so a mid-brightness tint here comes
+					// out washed rather than glassy. 0xBBGGRR.
 					uint32_t color;
 					if (!entry->read)
-						color = 0x202020;
+						color = 0x1a1a1a;   // unreadable: neutral grey
 					else if (entry->used)
-						color = 0x1256e3;
+						color = 0x702810;   // occupied: XMB blue
 					else if (entry->deleted)
-						color = 0x808020;
+						color = 0x184048;   // deleted: amber
 					else
-						color = 0x383010;
+						color = 0x281808;   // free: dim steel
 
 					bool isSelected = (slot == activeSlot) && (i == selected);
 					bool willShowIcon = entry->used && gridIconValid[slot][i];
 
-					if (isSelected) {
-						// Outside outline: a slightly larger orange
-						// backdrop drawn first, with the cell itself
-						// drawn on top - leaves a visible border around
-						// the outside rather than overlapping the icon.
-						drawRect(
-							ctx, x - 3, y - 3,
-							MC_CELL_W + 3, MC_CELL_H + 3,
-							0xff6600, false
-						);
-					}
-
-					drawRect(
+					drawGlassCell(
 						ctx, x, y, MC_CELL_W - 3, MC_CELL_H - 3,
-						willShowIcon ? 0xf0f0f0 : color, false
+						color, isSelected
 					);
 
 					if (willShowIcon) {
+						// The icon sits on top of the glass rather than
+						// replacing it, so the bevel still frames it.
 						drawIconTexture(
 							ctx, &gridIconTex[slot][i],
 							x + 3, y + 3, MC_CELL_W - 9
@@ -1444,7 +1528,10 @@ void runMemoryCardManager(
 				}
 			}
 
-			int panelY = MC_GRID_Y + MC_GRID_ROWS * MC_CELL_H + 8;
+			// +4 rather than +8: the panel's four lines have to finish above the
+			// control hints at y=200, and the grid now starts lower down to
+			// keep the title out of overscan.
+			int panelY = MC_GRID_Y + MC_GRID_ROWS * MC_CELL_H + 4;
 
 			const DirectoryEntry *sel = present[activeSlot] ? &entries[activeSlot][selected] : NULL;
 
@@ -1469,7 +1556,7 @@ void runMemoryCardManager(
 			}
 
 			if (noticeTimer > 0)
-				printString(ctx, 16, panelY + 36, 0x1256e3, notice);
+				printString(ctx, 16, panelY + 30, 0x1256e3, notice);
 
 			if (stage == STAGE_MENU) {
 				bool showClean = sel && sel->deleted;
@@ -1519,11 +1606,11 @@ void runMemoryCardManager(
 				}
 				printString(ctx, 78, 125, 0xffffff, "X: confirm   Triangle: cancel");
 			} else {
-				printString(ctx, 16, 200, 0x505050, "D-PAD select   X: options");
+				printString(ctx, 16, 202, 0x505050, "D-PAD select   X: options");
 				if (present[0] && present[1])
-					printString(ctx, 16, 210, 0x505050, "L1/R1: switch card   START: refresh");
+					printString(ctx, 16, 212, 0x505050, "L1/R1: switch card   START: refresh");
 				else
-					printString(ctx, 16, 210, 0x505050, "START: refresh cards");
+					printString(ctx, 16, 212, 0x505050, "START: refresh cards");
 			}
 		}
 
