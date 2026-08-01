@@ -105,16 +105,16 @@ static int fillsCover(const AppLaunchPlan *plan, uint32_t addr) {
 }
 
 static void testStandaloneSIOLoader(void) {
-	printf("standalone SIO loader (0x801b0000, 6144 bytes)\n");
+	printf("standalone SIO loader (0x801b0000, 8192 bytes)\n");
 
 	/* Exactly the header of the shipped assets/sioloader.exe. */
-	makeExe(0x801b0000, 0x801b0000, 0x1800, 0x801b1770, 2064, 0x801bdff0);
+	makeExe(0x801b0000, 0x801b0000, 0x2000, 0x801b1fb0, 2056, 0x801bdff0);
 
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
 
 	CHECK(plan.dest == 0x801b0000);
-	CHECK(plan.destEnd == 0x801b1800);
+	CHECK(plan.destEnd == 0x801b2000);
 	CHECK(plan.entry == 0x801b0000);
 	CHECK(plan.sp == 0x801bdff0);
 
@@ -127,8 +127,8 @@ static void testStandaloneSIOLoader(void) {
 	/* Without eraseRam the only fill is the PS-EXE memfill, rounded up to a
 	 * whole number of words. */
 	CHECK(plan.fillCount == 1);
-	CHECK(plan.fillStart[0] == 0x801b1770);
-	CHECK(plan.fillBytes[0] == ((2064 + 3) & ~3u));
+	CHECK(plan.fillStart[0] == 0x801b1fb0);
+	CHECK(plan.fillBytes[0] == ((2056 + 3) & ~3u));
 }
 
 static void testUniROM(void) {
@@ -222,7 +222,7 @@ static void testArenaClearsDashboardImage(void) {
 static void testEraseRamFills(void) {
 	printf("erase-RAM fill list\n");
 
-	makeExe(0x801b0000, 0x801b0000, 0x1800, 0x801b1770, 2064, 0x801bdff0);
+	makeExe(0x801b0000, 0x801b0000, 0x2000, 0x801b1fb0, 2056, 0x801bdff0);
 
 	AppLaunchPlan plan;
 	CHECK_RESULT(planEmbeddedApp(exeBuffer, 1, &plan), APP_PLAN_OK);
@@ -246,7 +246,7 @@ static void testEraseRamFills(void) {
 	 * the BSS start must survive. */
 	CHECK(!fillsCover(&plan, plan.dest));
 	CHECK(!fillsCover(&plan, plan.dest + 0x1000));
-	CHECK(!fillsCover(&plan, 0x801b176c));
+	CHECK(!fillsCover(&plan, 0x801b1fac));
 
 	/* nor stage 1, its parameters or its fill list, */
 	CHECK(!fillsCover(&plan, plan.arena));
