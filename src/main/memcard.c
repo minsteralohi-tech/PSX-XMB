@@ -1189,6 +1189,7 @@ void runMemoryCardManager(
 						newSel++;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1199,6 +1200,7 @@ void runMemoryCardManager(
 						newSel--;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1209,6 +1211,7 @@ void runMemoryCardManager(
 						newSel += MC_GRID_COLS;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1219,6 +1222,7 @@ void runMemoryCardManager(
 						newSel -= MC_GRID_COLS;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1232,6 +1236,7 @@ void runMemoryCardManager(
 						newSlot = 1;
 
 					if (newSlot != activeSlot) {
+						playScrollSound();
 						activeSlot = newSlot;
 						if (!isSelectableCell(entries[activeSlot], selected)) {
 							int fallback = selected;
@@ -1255,6 +1260,7 @@ void runMemoryCardManager(
 						&entries[activeSlot][selected];
 
 					if (cell->read && (cell->used || cell->deleted)) {
+						playConfirmSound();
 						stage        = STAGE_MENU;
 						menuSelected = MENU_OPTION_COPY;
 					}
@@ -1263,18 +1269,23 @@ void runMemoryCardManager(
 				bool showClean = entries[activeSlot][selected].deleted;
 
 				if (pressed & PAD_BTN_DOWN) {
+					playScrollSound();
 					menuSelected = (menuSelected + 1) % MENU_NUM_OPTIONS;
 					if (!showClean && (menuSelected == MENU_OPTION_CLEAR))
 						menuSelected = (menuSelected + 1) % MENU_NUM_OPTIONS;
 				}
 				if (pressed & PAD_BTN_UP) {
+					playScrollSound();
 					menuSelected = (menuSelected + MENU_NUM_OPTIONS - 1) % MENU_NUM_OPTIONS;
 					if (!showClean && (menuSelected == MENU_OPTION_CLEAR))
 						menuSelected = (menuSelected + MENU_NUM_OPTIONS - 1) % MENU_NUM_OPTIONS;
 				}
-				if (pressed & PAD_BTN_CIRCLE)
+				if (pressed & PAD_BTN_CIRCLE) {
+					playCancelSound();
 					stage = STAGE_BROWSING;
+				}
 				if (pressed & PAD_BTN_CROSS) {
+					playConfirmSound();
 					if (menuSelected == MENU_OPTION_CANCEL) {
 						stage = STAGE_BROWSING;
 					} else if (menuSelected == MENU_OPTION_DELETE || menuSelected == MENU_OPTION_FORMAT || menuSelected == MENU_OPTION_CLEAR) {
@@ -1332,9 +1343,12 @@ void runMemoryCardManager(
 					}
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				if (pressed & PAD_BTN_CIRCLE)
+				if (pressed & PAD_BTN_CIRCLE) {
+					playCancelSound();
 					stage = STAGE_BROWSING;
+				}
 				if (pressed & PAD_BTN_CROSS) {
+					playConfirmSound();
 					stage = STAGE_BROWSING;
 
 					if (menuSelected == MENU_OPTION_DELETE) {
@@ -1432,6 +1446,7 @@ void runMemoryCardManager(
 		}
 
 		if ((stage == STAGE_BROWSING) && (released & PAD_BTN_START) && startRefreshCandidate) {
+			playConfirmSound();
 			startRefreshCandidate = false;
 			present[0] = detectMemoryCard(0, resp0);
 			present[1] = detectMemoryCard(1, resp1);
@@ -1557,7 +1572,7 @@ void runMemoryCardManager(
 			}
 
 			if (noticeTimer > 0)
-				printString(ctx, 16, panelY + 30, mcScale(mcAccent, 7, 2), notice);
+				printString(ctx, 16, panelY + 30, 0x1256e3, notice);
 
 			if (stage == STAGE_MENU) {
 				bool showClean = sel && sel->deleted;
@@ -1601,9 +1616,12 @@ void runMemoryCardManager(
 						continue;
 					printString(
 						ctx, boxX + 8, 74 + drawRow * 16,
-						(i == menuSelected)
-							? mcScale(mcAccent, 7, 2)   // light tint of the
-							: 0xffffff,                 // theme accent
+						// The shared UI accent (COLOR_HIGHLIGHT1 in ui.c),
+						// same as the RAM tester's highlight bar and the CD
+						// player's state text. Deliberately NOT theme-tinted:
+						// it is the one colour that means "this is selected"
+						// everywhere in the dashboard.
+						(i == menuSelected) ? 0x1256e3 : 0xffffff,
 						labels[i]
 					);
 					drawRow++;
@@ -1629,7 +1647,15 @@ void runMemoryCardManager(
 					CH_PS1_CROSS_BUTTON ": confirm   "
 					CH_PS1_CIRCLE_BUTTON ": cancel");
 			} else {
-				printString(ctx, 16, 202, 0x505050, "D-PAD select   X: options");
+				// With no card in either slot there is nothing to select and
+				// nothing to open, so the only useful action is the refresh -
+				// say so here rather than listing controls that do nothing.
+				if (!present[0] && !present[1])
+					printString(ctx, 16, 202, 0x505050,
+						CH_PS1_START_BUTTON ": Refresh");
+				else
+					printString(ctx, 16, 202, 0x505050,
+						"D-PAD select   " CH_PS1_CROSS_BUTTON ": options");
 				if (present[0] && present[1])
 					printString(ctx, 16, 212, 0x505050, "L1/R1: switch card   START: refresh");
 				else
