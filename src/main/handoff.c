@@ -19,28 +19,62 @@
 static void quiesceCommon(void) {
 	// 0. Quiet the CD-ROM controller.
 	//
-	//    Entering the CD player and coming back leaves the drive spinning,
-	//    the audio path live and - the part that actually breaks things - an
-	//    interrupt flag latched in the controller. UniROM does its own CD-ROM
-	//    init on start-up and waits on that controller; handed one that is
-	//    mid-response with an unacknowledged IRQ, it waits forever. That is
-	//    the "black screen, but only if you visited the CD player first"
-	//    report, and it is why launching UniROM straight from the menu was
-	//    always fine.
+	//    Visiting the CD player and coming back leaves the drive spinning or
+	//    paused with the audio path live, and UniROM waits on that controller
+	//    during its own start-up - hence "black screen, but only if you went
+	//    into the CD player first". Launching straight from the menu was
+	//    always fine because the drive had never been started.
 	//
-	//    Raw register pokes rather than cd_player.c's helpers: those wait for
-	//    a response, and nothing in this function may block. Stop the drive,
-	//    disable CD interrupts, acknowledge anything pending.
+	//    The first attempt at this just wrote CdlStop and acknowledged, and
+	//    it did not work: the command byte is dropped if the controller is
+	//    still busy with the previous one, so the drive kept playing. This
+	//    version waits for BUSYSTS to clear first, then waits for the stop to
+	//    be acknowledged, then clears the FIFOs.
+	//
+	//    Every wait is bounded. cd_player.c's helpers spin forever on
+	//    BUSYSTS, which is fine while the dashboard is running and completely
+	//    unacceptable here - a controller that never goes idle must not take
+	//    the hand-off down with it.
 	{
 		volatile uint8_t *cd = (volatile uint8_t *) 0x1f801800;
+		unsigned guard;
 
-		cd[0] = 0;      // index 0: command/parameter port
-		cd[1] = 0x08;   // CdlStop, fire and forget
-		cd[0] = 1;      // index 1: interrupt enable / flag
-		cd[2] = 0x00;   // no CD interrupts
-		cd[3] = 0x07;   // acknowledge INT1..INT3
+		cd[0] = 0;                                  // index 0
+
+		guard = 0x100000;
+		while ((cd[0] & 0x80) && --guard)            // BUSYSTS
+			;
+
+		cd[0] = 1;                                  // index 1
+		cd[3] = 0x1f;                               // ack INT1..INT5
+		cd[3] = 0x40;                               // reset the parameter FIFO
+		cd[2] = 0x00;                               // disable CD interrupts
+		cd[0] = 0;
+
+		cd[1] = 0x08;                               // CdlStop
+
+		// Let the stop land. It answers INT3 first and INT2 once the motor
+		// has actually spun down; we only need the controller to reach idle.
+		guard = 0x400000;
+		while ((cd[0] & 0x80) && --guard)
+			;
+
+		cd[0] = 1;
+		cd[3] = 0x1f;                               // ack whatever it raised
+		cd[3] = 0x40;
+		cd[2] = 0x00;
 		cd[0] = 0;
 	}
+
+	// 0b. Mute the SPU's CD audio input.
+	//
+	//     cd_player.c routes CD-DA through the SPU by setting the CD input
+	//     volume and SPU_CTRL's CD-audio-enable bit. Silencing the voices is
+	//     not enough on its own - this is a separate path into the mixer, and
+	//     leaving it open means the next program inherits it.
+	*(volatile uint32_t *) 0x1f801db0 = 0;          // CD input volume L/R
+	*(volatile uint16_t *) 0x1f801daa &=
+		(uint16_t) ~0x0001;                          // SPU_CTRL: CD audio off
 
 	// 1. Put both serial buses back to a neutral state.
 	//

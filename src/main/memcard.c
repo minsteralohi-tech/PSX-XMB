@@ -904,6 +904,7 @@ static void drawIconTexture(
 	ptr[3] = gp0_xy(displaySize, displaySize);
 }
 
+
 /* ---- Manager UI ---- */
 
 #define MC_GRID_COLS 3
@@ -939,7 +940,20 @@ static void drawIconTexture(
 static uint32_t mcAccent = 0x702810;   /* 0xBBGGRR, replaced each frame */
 static uint32_t mcGlow   = 0xffd8a0;
 
-/* Local shade helper; the tile itself is drawn by drawGlassPanel(). */
+/*
+ * A readable panel: one flat tint, bevelled edge, no sheen.
+ *
+ * drawGlassPanel() is right for a small tile the eye skims over, but wrong
+ * behind a block of text - its sheen puts two different tones behind the same
+ * line. Here the body is drawn twice so it settles to about 75% opacity
+ * (blending is a fixed 50% mix, so each pass halves what shows through), then
+ * the same top-left/bottom-right bevel ties it to the tiles around it.
+ */
+static void drawGlassCard(
+	RenderContext *ctx, int x, int y, int w, int h, uint32_t tint
+);
+
+/* Local shade helper; the tiles themselves are drawn by drawGlassPanel(). */
 static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
 	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
@@ -950,6 +964,25 @@ static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	if (b > 0xff) b = 0xff;
 
 	return (b << 16) | (g << 8) | r;
+}
+
+static void drawGlassCard(
+	RenderContext *ctx, int x, int y, int w, int h, uint32_t tint
+) {
+	uint32_t body = mcScale(tint, 3, 4);   /* a touch darker than the tiles */
+
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x + 1, y,         w - 2, 1,     body, true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1,     body, true);
+
+	uint32_t lit   = mcScale(tint, 5, 2);
+	uint32_t shade = mcScale(tint, 1, 3);
+
+	drawRect(ctx, x + 1,     y,         w - 2, 1,     lit,   true);
+	drawRect(ctx, x,         y + 1,     1,     h - 2, lit,   true);
+	drawRect(ctx, x + 1,     y + h - 1, w - 2, 1,     shade, true);
+	drawRect(ctx, x + w - 1, y + 1,     1,     h - 2, shade, true);
 }
 
 
@@ -1540,14 +1573,19 @@ void runMemoryCardManager(
 				int boxX     = (320 - boxWidth) / 2;
 				int boxH     = 106;
 
-				// Same crystal material as the block grid and the CD player,
-				// so the popup belongs to the screen it sits on. No glow: it
-				// is a container, not a selectable item.
-				drawGlassPanel(ctx, boxX, 50, boxWidth, boxH, mcAccent, 0);
+				// A panel has to be readable first and pretty second, so this
+				// deliberately does NOT use drawGlassPanel(): its sheen band
+				// and brighter title bar split the background into two tones
+				// behind the text, and white text over the lighter one was
+				// hard to read.
+				//
+				// Instead: one flat tint at roughly 75% opacity. Blending is
+				// a fixed 50% mix on this hardware, so drawing the same rect
+				// twice halves the remaining transparency each time - two
+				// passes is enough to settle the text background down while
+				// still letting a hint of the wallpaper through.
+				drawGlassCard(ctx, boxX, 50, boxWidth, boxH, mcAccent);
 
-				// Title bar, a brighter band of the same tint.
-				drawRect(ctx, boxX + 1, 51, boxWidth - 2, 15,
-				         mcScale(mcAccent, 2, 1), true);
 				printString(ctx, boxX + 8, 54, 0xffffff, titleLine);
 
 				const char *labels[MENU_NUM_OPTIONS];
@@ -1569,11 +1607,11 @@ void runMemoryCardManager(
 					drawRow++;
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				// Crystal body like the options popup, but the title band
+				// Same flat card as the options popup, but the title band
 				// stays red: this dialog destroys data and should not blend
 				// into the theme.
-				drawGlassPanel(ctx, 70, 85, 200, 60, mcAccent, 0);
-				drawRect(ctx, 71, 86, 198, 15, 0x2020c0, true);
+				drawGlassCard(ctx, 70, 85, 200, 60, mcAccent);
+				drawRect(ctx, 71, 86, 198, 15, 0x2020c0, false);
 				if (menuSelected == MENU_OPTION_FORMAT) {
 					printString(ctx, 78, 89, 0xffffff, "Format this card?");
 					printString(ctx, 78, 107, 0xffffff, "Erases ALL saves!");
