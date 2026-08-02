@@ -260,6 +260,11 @@ static void applyReverbPreset(ReverbPreset preset) {
 #define CD_CONTROLS2_Y  184
 #define CD_EXIT_HINT_Y  204
 
+/* Video frames per second. PAL runs at 50, so the clock gains about a second
+ * every five minutes there - invisible on a single track, and not worth a
+ * region check on the display path. */
+#define CD_FRAMES_PER_SECOND 60
+
 #define GRID_COLS       5
 #define GRID_MAX_ROWS   4
 #define GRID_MAX_TRACKS (GRID_COLS * GRID_MAX_ROWS)
@@ -303,6 +308,8 @@ void runCDPlayer(
 	uint16_t  lastButtons   = 0;
 	int       elapsedMin    = 0;
 	int       elapsedSec    = 0;
+	/* Drives the elapsed display - see the note in the playing branch. */
+	int       elapsedFrames = 0;
 	int       discCheckTimer = 0;
 
 	char line[64];
@@ -385,7 +392,8 @@ void runCDPlayer(
 			if (pressed & PAD_BTN_CROSS) {
 				uint8_t param = decToBcd(currentTrack);
 				cdromCommand(CD_CMD_PLAY, &param, 1, response, sizeof(response));
-				playState = CD_PLAYING;
+				playState     = CD_PLAYING;
+				elapsedFrames = 0;
 			}
 			if (pressed & PAD_BTN_SQUARE) {
 				cdromCommand(CD_CMD_PAUSE, NULL, 0, response, sizeof(response));
@@ -393,39 +401,35 @@ void runCDPlayer(
 			}
 			if (pressed & PAD_BTN_CIRCLE) {
 				cdromCommand(CD_CMD_STOP, NULL, 0, response, sizeof(response));
-				playState  = CD_STOPPED;
-				elapsedMin = 0;
-				elapsedSec = 0;
+				playState     = CD_STOPPED;
+				elapsedMin    = 0;
+				elapsedSec    = 0;
+				elapsedFrames = 0;
 			}
 
 			if (playState == CD_PLAYING) {
 				/*
-				 * Ask the drive for the elapsed time twice a second, not
-				 * every frame.
+				 * Elapsed time is counted in frames, not asked of the drive.
 				 *
 				 * GetLocP blocks until the controller answers, and that wait
-				 * is long enough to push the frame past vblank - which shows
-				 * up as tearing and black lines across the top of the screen
-				 * for exactly as long as a track is playing, and disappears
-				 * the moment it stops. The display only shows whole seconds,
-				 * so 30 frames between queries loses nothing.
+				 * is long enough to push the frame past vblank - which showed
+				 * up as the title line tearing for exactly as long as a track
+				 * was playing. Throttling it only made the tear periodic
+				 * instead of constant, because the stall itself is the
+				 * problem, not how often it happens.
+				 *
+				 * A frame counter has no stall at all. The display shows
+				 * whole seconds and a track runs a few minutes, so the drift
+				 * against the drive's own clock is not visible. The counter
+				 * is re-seeded from the drive on play/pause/track change,
+				 * which are user-initiated and already pause briefly.
 				 */
-				static int locPollDelay = 0;
+				elapsedFrames++;
 
-				if (locPollDelay > 0) {
-					locPollDelay--;
-				} else {
-					locPollDelay = 30;
+				int seconds = elapsedFrames / CD_FRAMES_PER_SECOND;
 
-					uint8_t loc[16];
-					int locLen = cdromCommand(
-						CD_CMD_GETLOCP, NULL, 0, loc, sizeof(loc)
-					);
-					if (locLen >= 4) {
-						elapsedMin = bcdToDec(loc[2]);
-						elapsedSec = bcdToDec(loc[3]);
-					}
-				}
+				elapsedMin = seconds / 60;
+				elapsedSec = seconds % 60;
 			}
 		}
 

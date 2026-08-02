@@ -694,6 +694,7 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
  * thereafter only when something asks for one via gameIdRequestScan().
  */
 static int scanCountdown = -1;
+static int chimeDelay    = -1;
 
 void gameIdRequestScan(void) {
 	if (scanCountdown < 0)
@@ -709,6 +710,15 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 	if (current.noticeTime > 0)
 		current.noticeTime--;
+
+	if (chimeDelay > 0) {
+		chimeDelay--;
+
+		if (chimeDelay == 0) {
+			gameIdNoticeSound();
+			chimeDelay = -1;
+		}
+	}
 
 	if (scratchSize < GAMEID_SCRATCH_SIZE)
 		return;
@@ -734,7 +744,6 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 				current.state      = GAMEID_READING;
 				current.id[0]      = '\0';
 				current.noticeTime = GAMEID_NOTICE_FRAMES;
-				gameIdNoticeSound();
 			}
 
 			return;
@@ -743,7 +752,16 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 		scanCountdown = -1;
 		gameIdReadDisc(scratch, scratchSize);
 		current.noticeTime = GAMEID_NOTICE_FRAMES;
-		gameIdNoticeSound();
+
+		/*
+		 * Chime a second after the result rather than at either end of the
+		 * read. Playing it as the read starts sounds broken, because the
+		 * blocking read then stops everything mid-sample; playing it the
+		 * instant the read returns is jerky for the same reason, as the
+		 * machine is still catching up. A short delay lets the frame rate
+		 * settle first, and lands the sound under the finished card.
+		 */
+		chimeDelay = 60;
 		return;
 	}
 
@@ -772,6 +790,12 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 	pollDelay = 20;
 
+	/*
+	 * Once a disc has been reported there is nothing to look for except the
+	 * lid opening, and that is all this poll does. It keeps running rather
+	 * than stopping entirely because the open event is what arms the next
+	 * scan - but it never scans again on its own.
+	 */
 	uint8_t stat = cdPollStat();
 
 	if (stat == 0xff)
@@ -793,8 +817,17 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	}
 
 	if (!isOpen && wasOpen) {
-		/* Give the drive ~1.5s to spin up before asking it for sectors. */
-		settle = 90;
+		/*
+		 * Wait as long after a lid close as the dashboard waits after boot.
+		 *
+		 * 1.5s was not enough: closing the lid reported "Disc not readable",
+		 * and pressing R1 a few seconds later read the same disc fine. The
+		 * boot path has always worked, and the only difference was that it
+		 * waited 3 seconds. The drive is starting from a dead stop in both
+		 * cases, so it gets the same budget here - with a little extra,
+		 * since after a swap it also has to re-read the table of contents.
+		 */
+		settle = 240;
 	}
 
 	wasOpen = isOpen;
