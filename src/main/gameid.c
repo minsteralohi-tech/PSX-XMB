@@ -362,19 +362,6 @@ static bool cdReadSectors(uint32_t lba, uint8_t *dest, int count) {
 		toBcd(frames % 75)
 	};
 
-	/*
-	 * TEN Setloc retries. Do not reduce this.
-	 *
-	 * This is UniROM's value and it is load-bearing on real hardware: it is
-	 * how a drive that is still spinning up gets seated. Cutting it to two
-	 * broke detection completely on a console while an emulator carried on
-	 * working perfectly, because emulators answer Setloc immediately and a
-	 * real drive does not.
-	 *
-	 * The audio-CD cost this was meant to address is handled by the OUTER
-	 * scan loop instead - fewer attempts, spaced further apart - which does
-	 * not touch the spin-up path.
-	 */
 	bool seated = false;
 
 	for (int tries = 0; tries < 10 && !seated; tries++) {
@@ -528,8 +515,6 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
  * for an audio CD, or 0.
  */
-#define GAMEID_NO_DATA_DISC (-3)
-
 static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < 2048)
 		return 0;
@@ -540,21 +525,6 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	 * this the first attempt after a swap sees the previous disc. */
 	cdCommand(CMD_INIT, NULL, 0);
 	cdCommand(CMD_GETSTAT, NULL, 0);
-
-	/*
-	 * No GetID gate here, deliberately.
-	 *
-	 * Two attempts at using GetID to pre-classify the disc both broke
-	 * detection outright. The drive answers INT5 for an unlicensed disc, and
-	 * every CD-R is unlicensed - so backups were rejected before the read
-	 * even started. Narrowing the test to the audio flag did not help
-	 * either: pressed discs stopped being detected too, so whatever those
-	 * response bytes mean in practice, they are not something to gate on.
-	 *
-	 * The read itself is the reliable test, and it is the one that worked.
-	 * Audio CDs are handled by making failure cheap rather than by trying to
-	 * predict it - see the guard values and the attempt cap.
-	 */
 
 	int result = 0;
 
@@ -696,14 +666,6 @@ void gameIdClearNotice(void) {
 static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 	int got = readSystemCnf(scratch, scratchSize);
 
-	if (got == GAMEID_NO_DATA_DISC) {
-		/* Audio disc, no disc, or the lid is open. Distinct from a failed
-		 * read so the scan loop can stop instead of retrying. */
-		current.state = GAMEID_NO_DISC;
-		current.id[0] = '\0';
-		return;
-	}
-
 	if (got <= 0) {
 		current.state = GAMEID_NO_DISC;
 		current.id[0] = '\0';
@@ -772,17 +734,23 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
  */
 #define SCAN_SETTLE_BOOT   180   /* 3s  - drive is usually already spinning */
 #define SCAN_SETTLE_LID    300   /* 5s  - cold start after a swap           */
-#define SCAN_RETRY_GAP     240   /* 4s  between attempts                    */
 /*
- * Five attempts, four seconds apart: the same ~20 second window as before,
- * but half the number of failed reads inside it.
+ * AUDIO-CD COST: this scheduling is the ONLY thing tuned for it.
  *
- * This is the only lever pulled for the audio-CD lag. A disc that is going to
- * read succeeds on the first or second attempt once the drive is up, so a
- * good disc never notices; an audio disc, which can never read, now burns
- * five failed attempts instead of ten or twelve.
+ * Nothing below the scan loop is touched. Several attempts to make an audio
+ * disc cheaper by changing the CD driver - a GetID pre-check, fewer Setloc
+ * retries - each broke detection on real hardware while continuing to work
+ * perfectly on an emulator. The read path is now treated as fixed.
+ *
+ * Four attempts five seconds apart covers the same ~20 second window as ten
+ * attempts two seconds apart, with 60% fewer failed reads inside it. A disc
+ * that is going to read succeeds on the first or second attempt once the
+ * drive is up, so a working disc is unaffected; an audio disc, which can
+ * never read, stutters four times instead of ten and then stops for good
+ * until the lid moves.
  */
-#define SCAN_MAX_ATTEMPTS  5
+#define SCAN_RETRY_GAP     300   /* 5s between attempts */
+#define SCAN_MAX_ATTEMPTS  4
 
 static int scanSettle    = -1;   /* frames until the first attempt */
 static int scanAttempts  = 0;    /* attempts left, 0 = not scanning */
@@ -839,21 +807,6 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 		scanAttempts--;
 		gameIdReadDisc(scratch, scratchSize);
-
-		if (current.state == GAMEID_NO_DISC) {
-			/*
-			 * The drive told us there is nothing readable in there - an
-			 * audio CD, an empty drive, or an open lid. Retrying cannot
-			 * change that answer, so stop now rather than grinding through
-			 * the rest of the window. This is what made an audio disc lag
-			 * the dashboard for half a minute.
-			 */
-			scanAttempts  = 0;
-			current.state = GAMEID_IDLE;
-			current.id[0] = '\0';
-			cdStopMotor();
-			return;
-		}
 
 		if (current.state == GAMEID_FOUND ||
 		    current.state == GAMEID_UNLISTED) {
