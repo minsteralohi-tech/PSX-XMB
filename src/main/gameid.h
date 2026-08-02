@@ -76,6 +76,12 @@ const GameIdState *gameIdGet(void);
  */
 void drawGameIdNotice(RenderContext *ctx);
 
+/*
+ * True while a game has been identified and its card is still on screen, so
+ * the caller can offer START as a launch shortcut.
+ */
+int gameIdCanLaunch(void);
+
 /* Dismiss the corner notification early. */
 void gameIdClearNotice(void);
 

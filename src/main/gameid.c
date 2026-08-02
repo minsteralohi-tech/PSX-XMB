@@ -65,6 +65,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "main/defs.h"
 #include "main/font.h"
 #include "main/sound.h"
 #include "main/gameid.h"
@@ -239,9 +240,22 @@ static const char *dbLookup(const char *bootName) {
 #define CMD_READN   0x06
 #define CMD_PAUSE   0x09
 #define CMD_SETMODE 0x0e
+#define CMD_STOP    0x08
 
-#define GUARD_CMD  0x200000u
-#define GUARD_DATA 0x800000u
+/*
+ * Spin budgets.
+ *
+ * Deliberately modest. These are how long a FAILING operation takes, and a
+ * failure is the common case while a drive is still spinning up - or forever,
+ * on an audio CD, which has no data track to read at all. The original values
+ * were roughly 8x larger and made each failed attempt take long enough to
+ * drop several frames; with a dozen retries that turned into seconds of
+ * stutter and, on an audio disc, a dashboard that looked like it had hung.
+ *
+ * A drive that is genuinely ready answers well inside these.
+ */
+#define GUARD_CMD  0x40000u
+#define GUARD_DATA 0x120000u
 
 static uint16_t cdSavedMask;
 
@@ -537,6 +551,22 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	return result;
 }
 
+/*
+ * Stop the motor.
+ *
+ * Sent as soon as a disc has been identified, which is what UniROM does once
+ * it no longer needs the drive. Two reasons: there is no point spinning a disc
+ * for a dashboard that has finished reading it, and - the practical one - a
+ * spinning, seeking drive answers GetStat slowly enough to drop a frame, so
+ * the lid poll made the whole top of the screen blink every couple of seconds.
+ * A stopped drive answers immediately.
+ */
+static void cdStopMotor(void) {
+	cdBegin();
+	cdCommand(CMD_STOP, NULL, 0);
+	cdEnd();
+}
+
 /* Drive status byte, or 0xff. Used for lid detection; safe now because
  * cdBegin() masks the BIOS handler for the duration. */
 static uint8_t cdPollStat(void) {
@@ -616,6 +646,13 @@ void gameIdInit(void) {
 
 const GameIdState *gameIdGet(void) {
 	return &current;
+}
+
+int gameIdCanLaunch(void) {
+	if (current.noticeTime <= 0)
+		return 0;
+
+	return current.state == GAMEID_FOUND || current.state == GAMEID_UNLISTED;
 }
 
 void gameIdClearNotice(void) {
@@ -698,7 +735,7 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 #define SCAN_SETTLE_BOOT   180   /* 3s  - drive is usually already spinning */
 #define SCAN_SETTLE_LID    300   /* 5s  - cold start after a swap           */
 #define SCAN_RETRY_GAP     120   /* 2s  between attempts                    */
-#define SCAN_MAX_ATTEMPTS  12    /* ~25s total before giving up quietly     */
+#define SCAN_MAX_ATTEMPTS  10    /* ~25s total before giving up quietly     */
 
 static int scanSettle    = -1;   /* frames until the first attempt */
 static int scanAttempts  = 0;    /* attempts left, 0 = not scanning */
@@ -762,6 +799,9 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 			scanAttempts       = 0;
 			current.noticeTime = GAMEID_NOTICE_FRAMES;
 			chimeDelay         = 60;
+
+			/* Nothing more to read - park the drive. */
+			cdStopMotor();
 			return;
 		}
 
@@ -769,8 +809,19 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 		current.state = GAMEID_IDLE;
 		current.id[0] = '\0';
 
-		if (scanAttempts > 0)
+		if (scanAttempts > 0) {
 			scanSettle = SCAN_RETRY_GAP;
+		} else {
+			/*
+			 * Out of attempts. Stop the motor and say nothing.
+			 *
+			 * This is the audio-CD path as much as the no-disc one: an audio
+			 * disc has no data track, so every attempt fails and the window
+			 * simply expires. Nothing is shown, nothing keeps retrying, and
+			 * the drive is left parked rather than spinning.
+			 */
+			cdStopMotor();
+		}
 
 		return;
 	}
@@ -781,7 +832,9 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 		return;
 	}
 
-	pollDelay = 20;
+	/* A stopped drive answers instantly, so this is cheap - but there is no
+	 * reason to ask more than about twice a second. */
+	pollDelay = 30;
 
 	uint8_t stat = cdPollStat();
 
@@ -868,11 +921,34 @@ void drawGameIdNotice(RenderContext *ctx) {
 	if (!slideFx || !value)
 		return;
 
+	/*
+	 * "<game>  (START) to Launch" - the hint is part of the same card rather
+	 * than a second line, so the notification stays one line tall.
+	 */
+	char line[96];
+	int  i = 0;
+
+	while (value[i] && i < (int) sizeof(line) - 24) {
+		line[i] = value[i];
+		i++;
+	}
+
+	line[i] = '\0';
+
+	static const char hint[] = "  " CH_PS1_START_BUTTON " Launch";
+	int j = 0;
+
+	while (hint[j] && i < (int) sizeof(line) - 1)
+		line[i++] = hint[j++];
+
+	line[i] = '\0';
+	value   = line;
+
 	int textW = getStringWidth(value);
 	int boxW  = textW + 18;
 
-	if (boxW > 260)
-		boxW = 260;
+	if (boxW > 300)
+		boxW = 300;
 
 	int boxH = 22;                       /* one line, slim */
 	int boxY = 16;

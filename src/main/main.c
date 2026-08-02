@@ -22,6 +22,7 @@
 #include "main/font.h"
 #include "main/hud.h"
 #include "main/icon.h"
+#include "main/fastboot.h"
 #include "main/gameid.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
@@ -134,6 +135,13 @@ int main(int argc, const char **argv) {
 #if GAMEID_ENABLED
 			if (state.buttonsPressed & PAD_BTN_R1)
 				gameIdRequestScan();
+
+			// START on the disc notification boots the game, by handing over
+			// to cdloader.exe exactly as Fast Boot does - it already knows
+			// how to unlock the drive and start a disc, so there is no second
+			// implementation of that here. Never returns.
+			if ((state.buttonsPressed & PAD_BTN_START) && gameIdCanLaunch())
+				launchLoader();
 #endif
 
 			if (!isXMBActive()) {
