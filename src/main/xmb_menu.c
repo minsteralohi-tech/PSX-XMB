@@ -359,29 +359,43 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		// The original Gouraud Waves theme keeps its fixed icy-blue gradient.
 		if (xmbIconStyle == 3) {
 			/*
-			 * Clear Crystal: the icon as tinted glass rather than a coloured
-			 * shape.
+			 * Clear Crystal: the icon as tinted glass.
 			 *
-			 * ONE blended pass, deliberately. The first attempt at this drew
-			 * two or three passes to make it "read better" - which was
-			 * exactly wrong: blending is a fixed 50% mix, so each extra pass
-			 * halves the remaining transparency and the icon comes back to
-			 * looking solid. That is why it still looked like the opaque
-			 * gradient style.
+			 * Two things had to be right, and earlier attempts got both
+			 * wrong.
 			 *
-			 * The tint is pushed bright instead, since a single 50% pass of
-			 * a dark colour would disappear against the wallpaper. Selection
-			 * is shown by a brighter tint rather than by more passes, for
-			 * the same reason.
+			 * ONE blended pass. Blending is a fixed 50% mix, so a second
+			 * pass halves the remaining transparency and the icon goes back
+			 * to looking solid - which is exactly what was happening.
+			 *
+			 * A DARK tint. The artwork in icons_cat.png is pure white, and
+			 * the GPU modulates the texel by the vertex colour, so a bright
+			 * tint produces a bright opaque shape no matter how it is
+			 * blended. The memory card tiles read as glass because their
+			 * body is the accent at its DARK base value - the same value
+			 * used here, with only a modest lift toward the top for the
+			 * specular edge.
 			 */
-			uint32_t top, bot;
-			xmbGetIconGradient(&top, &bot);
+			uint32_t accent;
 
-			if (!sel) {
-				/* Unselected panes sit further back: dimmer, less contrast. */
-				top = (top >> 1) & 0x7f7f7f;
-				bot = (bot >> 1) & 0x7f7f7f;
-			}
+			xmbGetAccentColor(&accent, NULL);
+
+			uint32_t r = accent & 0xff;
+			uint32_t g = (accent >> 8) & 0xff;
+			uint32_t b = (accent >> 16) & 0xff;
+
+			/* Selected sits forward: same hue, a little more presence. */
+			int lift = sel ? 2 : 1;
+
+			uint32_t tr = r * (2 + lift) / 2, tg = g * (2 + lift) / 2,
+			         tb = b * (2 + lift) / 2;
+
+			if (tr > 0xff) tr = 0xff;
+			if (tg > 0xff) tg = 0xff;
+			if (tb > 0xff) tb = 0xff;
+
+			uint32_t top = gp0_rgb((uint8_t) tr, (uint8_t) tg, (uint8_t) tb);
+			uint32_t bot = gp0_rgb((uint8_t) r,  (uint8_t) g,  (uint8_t) b);
 
 			drawCategoryIconGradient(ctx, categories[i].icon,
 				x - size / 2, ROW_Y - size / 2, size, true, top, bot);

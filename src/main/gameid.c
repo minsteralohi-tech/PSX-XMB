@@ -363,18 +363,21 @@ static bool cdReadSectors(uint32_t lba, uint8_t *dest, int count) {
 	};
 
 	/*
-	 * Two tries, not ten.
+	 * TEN Setloc retries. Do not reduce this.
 	 *
-	 * UniROM's reader retries Setloc up to ten times because it is a one-shot
-	 * loader with nothing else to do. Here this sits INSIDE the scan's own
-	 * retry loop, so ten of these multiplied out to a hundred command
-	 * timeouts before a scan gave up - which is what made an audio CD lag
-	 * the whole dashboard for half a minute. The outer loop already handles
-	 * "the drive is not ready yet", and it does so without holding the frame.
+	 * This is UniROM's value and it is load-bearing on real hardware: it is
+	 * how a drive that is still spinning up gets seated. Cutting it to two
+	 * broke detection completely on a console while an emulator carried on
+	 * working perfectly, because emulators answer Setloc immediately and a
+	 * real drive does not.
+	 *
+	 * The audio-CD cost this was meant to address is handled by the OUTER
+	 * scan loop instead - fewer attempts, spaced further apart - which does
+	 * not touch the spin-up path.
 	 */
 	bool seated = false;
 
-	for (int tries = 0; tries < 2 && !seated; tries++) {
+	for (int tries = 0; tries < 10 && !seated; tries++) {
 		if (cdCommand(CMD_SETLOC, loc, 3) == 3) {
 			seated = true;
 			break;
@@ -525,14 +528,6 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
  * for an audio CD, or 0.
  */
-/* Drive status byte, or 0xff, without the begin/end wrapper. */
-static uint8_t cdStatRaw(void) {
-	if (cdCommand(CMD_GETSTAT, NULL, 0) && cdResultLen >= 1)
-		return cdResult[0];
-
-	return 0xff;
-}
-
 #define GAMEID_NO_DATA_DISC (-3)
 
 static int readSystemCnf(uint8_t *scratch, int scratchSize) {
@@ -540,14 +535,6 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 		return 0;
 
 	cdBegin();
-
-	/* Lid open: nothing to do, and no point spinning through retries. */
-	uint8_t stat = cdStatRaw();
-
-	if (stat != 0xff && (stat & 0x10)) {
-		cdEnd();
-		return GAMEID_NO_DATA_DISC;
-	}
 
 	/* Reset the controller so it re-reads the table of contents. Without
 	 * this the first attempt after a swap sees the previous disc. */
@@ -785,8 +772,17 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
  */
 #define SCAN_SETTLE_BOOT   180   /* 3s  - drive is usually already spinning */
 #define SCAN_SETTLE_LID    300   /* 5s  - cold start after a swap           */
-#define SCAN_RETRY_GAP     120   /* 2s  between attempts                    */
-#define SCAN_MAX_ATTEMPTS  8     /* ~20s total before giving up quietly     */
+#define SCAN_RETRY_GAP     240   /* 4s  between attempts                    */
+/*
+ * Five attempts, four seconds apart: the same ~20 second window as before,
+ * but half the number of failed reads inside it.
+ *
+ * This is the only lever pulled for the audio-CD lag. A disc that is going to
+ * read succeeds on the first or second attempt once the drive is up, so a
+ * good disc never notices; an audio disc, which can never read, now burns
+ * five failed attempts instead of ten or twelve.
+ */
+#define SCAN_MAX_ATTEMPTS  5
 
 static int scanSettle    = -1;   /* frames until the first attempt */
 static int scanAttempts  = 0;    /* attempts left, 0 = not scanning */
