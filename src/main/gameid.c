@@ -40,33 +40,6 @@
 #include "main/renderer.h"
 #include "main/xmb_bg.h"
 
-#define CDROM_REG0 (*(volatile uint8_t *) 0x1f801800)
-#define CDROM_REG1 (*(volatile uint8_t *) 0x1f801801)
-#define CDROM_REG2 (*(volatile uint8_t *) 0x1f801802)
-#define CDROM_REG3 (*(volatile uint8_t *) 0x1f801803)
-
-#define STAT_BUSYSTS 0x80
-#define STAT_RSLRRDY 0x20
-#define STAT_DRQSTS  0x40
-
-/* Bits in the drive status byte returned by GetStat. */
-#define DRIVE_SHELL_OPEN 0x10
-
-#define CMD_GETSTAT 0x01
-#define CMD_SETLOC  0x02
-#define CMD_READN   0x06
-#define CMD_PAUSE   0x09
-#define CMD_INIT    0x0a
-#define CMD_SETMODE 0x0e
-
-#define SECTOR_SIZE   2048
-#define PVD_SECTOR    16
-
-/* Spin budgets. Generous enough for a real drive, finite so a missing or
- * faulty one degrades to "no ID" instead of a hang. */
-#define GUARD_SHORT 0x80000u
-#define GUARD_LONG  0x800000u
-
 static GameIdState current;
 
 /* --- game name database ------------------------------------------------- *
@@ -196,235 +169,103 @@ static const char *dbLookup(const char *bootName) {
 
 /* --- low level ---------------------------------------------------------- */
 
-static void cdAckAll(void) {
-	CDROM_REG0 = 1;
-	CDROM_REG3 = 0x1f;
-	CDROM_REG3 = 0x40;
-	CDROM_REG0 = 0;
-}
+/*
+ * SYSTEM.CNF is read through the BIOS's own "cdrom:" filesystem device rather
+ * than by driving the CD-ROM registers directly.
+ *
+ * The first version of this file did drive them directly - SetLoc/SetMode/
+ * ReadN, then pulling the sector out of the data FIFO by hand, plus its own
+ * ISO9660 directory walk. That worked on emulators and failed on every real
+ * console, which is the classic signature: emulators are forgiving about
+ * command timing, the INT1 handshake and the DRQ/data-FIFO protocol, and real
+ * hardware is not. It also stalled for seconds on disc insertion, because a
+ * failing read sat in its retry loops.
+ *
+ * The BIOS already implements all of that correctly, with spin-up handling and
+ * retries, and it is what cdloader and tonyhax use for the same job. _96_init()
+ * brings the device up; after that a "cdrom:" path works with the ordinary
+ * open()/read()/close() calls.
+ */
+extern int  biosOpen(const char *path, int mode);
+extern int  biosRead(int fd, void *dest, int length);
+extern int  biosClose(int fd);
+extern void bios96Init(void);
+extern void bios96Remove(void);
 
-/* Returns the interrupt type (1..5), or 0 if nothing arrived in time. */
-static int cdWaitInt(unsigned guard) {
-	for (;;) {
-		CDROM_REG0 = 1;
-		uint8_t flags = CDROM_REG3 & 0x07;
-		CDROM_REG0 = 0;
+#define CDROM_REG0 (*(volatile uint8_t *) 0x1f801800)
+#define CDROM_REG1 (*(volatile uint8_t *) 0x1f801801)
+#define CDROM_REG3 (*(volatile uint8_t *) 0x1f801803)
 
-		if (flags)
-			return flags;
+#define STAT_BUSYSTS 0x80
+#define STAT_RSLRRDY 0x20
 
-		if (!--guard)
-			return 0;
-	}
-}
+/* Bit in the drive status byte returned by GetStat. */
+#define DRIVE_SHELL_OPEN 0x10
+
+#define CMD_GETSTAT 0x01
+
+#define SECTOR_SIZE 2048
+
+#define GUARD_SHORT 0x80000u
+#define GUARD_LONG  0x400000u
 
 /*
- * Issue a command and collect its first response. Returns the interrupt type,
- * 0 on timeout. respLen may be NULL.
+ * Drive status byte, or 0xff if the drive did not answer.
+ *
+ * This one command IS still issued directly: it is the cheapest possible way
+ * to watch the lid, it runs several times a second, and unlike a data read it
+ * is a single command with a single immediate response and no FIFO protocol.
+ * Everything that actually reads the disc goes through the BIOS above.
  */
-static int cdCommand(
-	uint8_t cmd, const uint8_t *params, int paramCount,
-	uint8_t *resp, int respMax, int *respLen
-) {
+static uint8_t cdGetStat(void) {
 	unsigned guard = GUARD_SHORT;
 
 	while ((CDROM_REG0 & STAT_BUSYSTS) && --guard)
 		;
 
 	if (!guard)
-		return 0;
+		return 0xff;
 
-	cdAckAll();
+	CDROM_REG0 = 1;
+	CDROM_REG3 = 0x1f;
+	CDROM_REG3 = 0x40;
+	CDROM_REG0 = 0;
+
+	CDROM_REG1 = CMD_GETSTAT;
+
+	guard = GUARD_LONG;
+
+	for (;;) {
+		CDROM_REG0 = 1;
+		uint8_t flags = CDROM_REG3 & 0x07;
+		CDROM_REG0 = 0;
+
+		if (flags)
+			break;
+
+		if (!--guard)
+			return 0xff;
+	}
+
+	uint8_t stat = 0xff;
 
 	CDROM_REG0 = 0;
-	for (int i = 0; i < paramCount; i++)
-		CDROM_REG2 = params[i];
 
-	CDROM_REG1 = cmd;
+	if (CDROM_REG0 & STAT_RSLRRDY)
+		stat = CDROM_REG1;
 
-	int type = cdWaitInt(GUARD_LONG);
-	int n    = 0;
-
-	if (type) {
-		while ((CDROM_REG0 & STAT_RSLRRDY) && n < respMax)
-			resp[n++] = CDROM_REG1;
-	}
+	while (CDROM_REG0 & STAT_RSLRRDY)
+		(void) CDROM_REG1;
 
 	CDROM_REG0 = 1;
 	CDROM_REG3 = 0x1f;
 	CDROM_REG0 = 0;
 
-	if (respLen)
-		*respLen = n;
-
-	return type;
-}
-
-/* Drive status byte, or 0xff if the drive did not answer. */
-static uint8_t cdGetStat(void) {
-	uint8_t resp[8];
-	int     len = 0;
-
-	if (!cdCommand(CMD_GETSTAT, NULL, 0, resp, sizeof(resp), &len) || !len)
-		return 0xff;
-
-	return resp[0];
-}
-
-static void decToBcd(int value, uint8_t *out) {
-	*out = (uint8_t) (((value / 10) << 4) | (value % 10));
+	return stat;
 }
 
 /*
- * Read one 2048-byte sector by LBA. Returns true on success.
- *
- * LBA 0 is at 00:02:00 on a Mode 2 disc, so the minute/second/frame the drive
- * wants is the LBA plus 150 frames.
- */
-static bool cdReadSector(uint32_t lba, uint8_t *out) {
-	uint32_t amount = lba + 150;
-	uint8_t  loc[3];
-
-	decToBcd((int) (amount / (60 * 75)), &loc[0]);
-	decToBcd((int) ((amount / 75) % 60), &loc[1]);
-	decToBcd((int) (amount % 75),        &loc[2]);
-
-	uint8_t resp[8];
-
-	if (!cdCommand(CMD_SETLOC, loc, 3, resp, sizeof(resp), NULL))
-		return false;
-
-	/* Mode: 2048-byte sectors, double speed. */
-	uint8_t mode = 0x80;
-
-	if (!cdCommand(CMD_SETMODE, &mode, 1, resp, sizeof(resp), NULL))
-		return false;
-
-	if (!cdCommand(CMD_READN, NULL, 0, resp, sizeof(resp), NULL))
-		return false;
-
-	/* Wait for the data-ready interrupt (INT1). */
-	int type = cdWaitInt(GUARD_LONG);
-
-	if (type != 1) {
-		cdAckAll();
-		cdCommand(CMD_PAUSE, NULL, 0, resp, sizeof(resp), NULL);
-		return false;
-	}
-
-	/* Drain the response FIFO before touching the data FIFO. */
-	while (CDROM_REG0 & STAT_RSLRRDY)
-		(void) CDROM_REG1;
-
-	CDROM_REG0 = 1;
-	CDROM_REG3 = 0x07;      /* acknowledge INT1 */
-	CDROM_REG0 = 0;
-
-	/* Request the sector into the data FIFO, then read it a byte at a time.
-	 * Deliberately not DMA: this runs while the dashboard owns the DMA
-	 * channels, and 2 KB of PIO once per disc insertion is not worth the
-	 * risk of disturbing them. */
-	CDROM_REG0 = 0;
-	CDROM_REG3 = 0x80;
-
-	unsigned guard = GUARD_SHORT;
-
-	while (!(CDROM_REG0 & STAT_DRQSTS) && --guard)
-		;
-
-	if (!guard) {
-		cdCommand(CMD_PAUSE, NULL, 0, resp, sizeof(resp), NULL);
-		return false;
-	}
-
-	for (int i = 0; i < SECTOR_SIZE; i++)
-		out[i] = CDROM_REG2;
-
-	CDROM_REG0 = 0;
-	CDROM_REG3 = 0x00;      /* stop requesting data */
-
-	cdCommand(CMD_PAUSE, NULL, 0, resp, sizeof(resp), NULL);
-	cdAckAll();
-
-	return true;
-}
-
-/* --- ISO9660 ------------------------------------------------------------ */
-
-static uint32_t readLE32(const uint8_t *p) {
-	return (uint32_t) p[0] | ((uint32_t) p[1] << 8) |
-	       ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
-}
-
-static bool nameMatches(const uint8_t *name, int len, const char *want) {
-	int i = 0;
-
-	for (; i < len && want[i]; i++) {
-		uint8_t c = name[i];
-
-		if (c >= 'a' && c <= 'z')
-			c = (uint8_t) (c - 'a' + 'A');
-
-		if (c != (uint8_t) want[i])
-			return false;
-	}
-
-	if (!want[i])
-		return true;   /* matched the whole wanted name */
-
-	return false;
-}
-
-/*
- * Find SYSTEM.CNF in the root directory. Returns its LBA, or 0.
- *
- * Only the first sector of the root directory is scanned. SYSTEM.CNF is
- * always among the first entries on a real PS1 disc - the BIOS itself relies
- * on that - so walking multi-sector directories is not worth the code.
- */
-static uint32_t findSystemCnf(uint8_t *scratch) {
-	if (!cdReadSector(PVD_SECTOR, scratch))
-		return 0;
-
-	if (scratch[0] != 0x01 ||
-	    scratch[1] != 'C' || scratch[2] != 'D' ||
-	    scratch[3] != '0' || scratch[4] != '0' || scratch[5] != '1')
-		return 0;   /* not an ISO9660 primary volume descriptor */
-
-	/* Root directory record lives at offset 156; its extent LBA at +2. */
-	uint32_t rootLba = readLE32(&scratch[156 + 2]);
-
-	if (!rootLba)
-		return 0;
-
-	if (!cdReadSector(rootLba, scratch))
-		return 0;
-
-	int offset = 0;
-
-	while (offset < SECTOR_SIZE) {
-		int recLen = scratch[offset];
-
-		if (recLen < 33)
-			break;   /* end of the records in this sector */
-
-		if (offset + recLen > SECTOR_SIZE)
-			break;
-
-		int nameLen = scratch[offset + 32];
-
-		if (nameLen > 0 &&
-		    nameMatches(&scratch[offset + 33], nameLen, "SYSTEM.CNF"))
-			return readLE32(&scratch[offset + 2]);
-
-		offset += recLen;
-	}
-
-	return 0;
-}
-
-/*
- * Pull the game ID out of a SYSTEM.CNF sector.
+ * Pull the game ID out of a SYSTEM.CNF image.
  *
  * The file looks like:
  *     BOOT = cdrom:\SLUS_004.02;1
@@ -434,24 +275,25 @@ static uint32_t findSystemCnf(uint8_t *scratch) {
  * Take what follows the last '\' or ':' on the BOOT line and stop at ';',
  * which is exactly what the BIOS patch's IDSTRINGBUILDER loop does.
  */
-static bool parseBootId(const uint8_t *sector, char *out, int outSize) {
-	for (int i = 0; i + 4 < SECTOR_SIZE; i++) {
-		if (sector[i] != 'B' || sector[i + 1] != 'O' ||
-		    sector[i + 2] != 'O' || sector[i + 3] != 'T')
+static bool parseBootId(const uint8_t *data, int length,
+                        char *out, int outSize) {
+	for (int i = 0; i + 4 < length; i++) {
+		if (data[i] != 'B' || data[i + 1] != 'O' ||
+		    data[i + 2] != 'O' || data[i + 3] != 'T')
 			continue;
 
 		int j = i + 4;
 
 		/* Skip spaces and the '=' */
-		while (j < SECTOR_SIZE &&
-		       (sector[j] == ' ' || sector[j] == '\t' || sector[j] == '='))
+		while (j < length &&
+		       (data[j] == ' ' || data[j] == '\t' || data[j] == '='))
 			j++;
 
 		/* Walk to the end of the token, remembering the last separator. */
 		int start = j;
 
-		while (j < SECTOR_SIZE && sector[j] > ' ' && sector[j] != ';') {
-			if (sector[j] == '\\' || sector[j] == '/' || sector[j] == ':')
+		while (j < length && data[j] > ' ' && data[j] != ';') {
+			if (data[j] == '\\' || data[j] == '/' || data[j] == ':')
 				start = j + 1;
 			j++;
 		}
@@ -462,7 +304,7 @@ static bool parseBootId(const uint8_t *sector, char *out, int outSize) {
 			return false;
 
 		for (int k = 0; k < len; k++) {
-			uint8_t c = sector[start + k];
+			uint8_t c = data[start + k];
 
 			if (c >= 'a' && c <= 'z')
 				c = (uint8_t) (c - 'a' + 'A');
@@ -475,6 +317,39 @@ static bool parseBootId(const uint8_t *sector, char *out, int outSize) {
 	}
 
 	return false;
+}
+
+/*
+ * Read SYSTEM.CNF into scratch. Returns the byte count, or 0.
+ *
+ * Both spellings of the path are tried: the BIOS filesystem is case sensitive
+ * and, while the ISO9660 standard uppercases names, not every disc image in
+ * the wild does.
+ */
+static int readSystemCnf(uint8_t *scratch, int scratchSize) {
+	static const char *const paths[] = {
+		"cdrom:\\SYSTEM.CNF;1",
+		"cdrom:SYSTEM.CNF;1",
+		"cdrom:\\system.cnf;1"
+	};
+
+	bios96Init();
+
+	for (unsigned p = 0; p < sizeof(paths) / sizeof(paths[0]); p++) {
+		int fd = biosOpen(paths[p], 1 /* O_RDONLY */);
+
+		if (fd < 0)
+			continue;
+
+		int got = biosRead(fd, scratch, scratchSize);
+
+		biosClose(fd);
+
+		if (got > 0)
+			return got;
+	}
+
+	return 0;
 }
 
 /* --- public ------------------------------------------------------------- */
@@ -497,10 +372,10 @@ void gameIdClearNotice(void) {
  * Read the disc now. Blocking, a few hundred milliseconds at worst, all of it
  * bounded. Called from gameIdPoll() on a lid-close transition.
  */
-static void gameIdReadDisc(uint8_t *scratch) {
-	uint32_t lba = findSystemCnf(scratch);
+static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
+	int got = readSystemCnf(scratch, scratchSize);
 
-	if (!lba) {
+	if (got <= 0) {
 		current.state = GAMEID_NO_DISC;
 		current.id[0] = '\0';
 		return;
@@ -508,8 +383,7 @@ static void gameIdReadDisc(uint8_t *scratch) {
 
 	char bootName[32];
 
-	if (!cdReadSector(lba, scratch) ||
-	    !parseBootId(scratch, bootName, sizeof(bootName))) {
+	if (!parseBootId(scratch, got, bootName, sizeof(bootName))) {
 		current.state = GAMEID_UNKNOWN;
 		current.id[0] = '\0';
 		return;
@@ -519,29 +393,17 @@ static void gameIdReadDisc(uint8_t *scratch) {
 	// user nothing. A disc that is not in the table falls back to the raw
 	// boot name, which at least identifies an import or a homebrew disc.
 	const char *name = dbLookup(bootName);
-
-	if (name) {
-		int i = 0;
-
-		while (name[i] && i < (int) sizeof(current.id) - 1) {
-			current.id[i] = name[i];
-			i++;
-		}
-
-		current.id[i]  = '\0';
-		current.state  = GAMEID_FOUND;
-		return;
-	}
+	const char *show = name ? name : bootName;
 
 	int i = 0;
 
-	while (bootName[i] && i < (int) sizeof(current.id) - 1) {
-		current.id[i] = bootName[i];
+	while (show[i] && i < (int) sizeof(current.id) - 1) {
+		current.id[i] = show[i];
 		i++;
 	}
 
 	current.id[i] = '\0';
-	current.state = GAMEID_UNLISTED;
+	current.state = name ? GAMEID_FOUND : GAMEID_UNLISTED;
 }
 
 void gameIdPoll(uint8_t *scratch, int scratchSize) {
@@ -555,13 +417,29 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < SECTOR_SIZE)
 		return;
 
-	/* One GetStat per ~15 frames is plenty to notice a lid, and keeps this
-	 * off the per-frame path entirely most of the time. */
+	/*
+	 * The read is unavoidably blocking - the BIOS spins the drive up, seeks
+	 * and retries, and there is no asynchronous form of open()/read(). What
+	 * it must NOT do is block silently: on the first attempt the console
+	 * appeared to freeze for several seconds with nothing on screen.
+	 *
+	 * So the notification card is put on screen first, saying the disc is
+	 * being read, and the read happens on the following frame. The user sees
+	 * the slide-in animation, then the pause, then the game name - which
+	 * reads as loading rather than as a hang.
+	 */
 	if (settle > 0) {
 		settle--;
 
+		if (settle == 1) {
+			current.state      = GAMEID_READING;
+			current.id[0]      = '\0';
+			current.noticeTime = GAMEID_NOTICE_FRAMES;
+			return;
+		}
+
 		if (settle == 0) {
-			gameIdReadDisc(scratch);
+			gameIdReadDisc(scratch, scratchSize);
 			current.noticeTime = GAMEID_NOTICE_FRAMES;
 		}
 
@@ -590,11 +468,12 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 	if (!isOpen && wasOpen) {
 		/*
-		 * Lid closed. Give the drive time to spin up and get a table of
-		 * contents before asking it for sectors - reading immediately after
-		 * the shell closes fails on real hardware. Roughly two seconds.
+		 * Lid closed. Give the drive time to spin up before asking the BIOS
+		 * for the file: reading immediately after the shell closes fails on
+		 * real hardware. Roughly a second and a half, then a frame to put
+		 * the "Reading disc" card up, then the read itself.
 		 */
-		settle = 120;
+		settle = 90;
 	}
 
 	wasOpen = isOpen;
@@ -635,6 +514,10 @@ void drawGameIdNotice(RenderContext *ctx) {
 	case GAMEID_FOUND:
 	case GAMEID_UNLISTED:
 		value = current.id;
+		break;
+
+	case GAMEID_READING:
+		value = "Reading disc...";
 		break;
 
 	case GAMEID_NO_DISC:

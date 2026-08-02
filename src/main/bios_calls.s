@@ -30,6 +30,8 @@ defBiosB0 biosAddDevice,    0x47
 defBiosB0 biosRemoveDevice, 0x48
 defBiosB0 biosOpen,         0x32
 defBiosB0 biosClose,        0x36
+defBiosB0 biosRead,         0x34
+defBiosB0 biosLseek,        0x33
 
 # --- A0 table calls (same idea, jump to 0xA0 with the index in $t1) -------
 # FlushCache (A0 0x44) must run before jumping into a freshly-received program
@@ -45,6 +47,14 @@ defBiosB0 biosClose,        0x36
 .endm
 
 defBiosA0 biosFlushCache,   0x44
+
+# _96_init (A0 0x54) brings up the kernel's CD-ROM filesystem device, the one
+# that backs "cdrom:" paths in open()/read(). Without it those calls fail on
+# real hardware even though an emulator may let them through.
+defBiosA0 bios96Init,       0x54
+
+# _96_remove (A0 0x56) tears it back down again.
+defBiosA0 bios96Remove,     0x56
 
 # Exec (A0 0x43) is how the BIOS itself starts a PS-EXE. Given a pointer to the
 # ten-word EXEC structure - which is exactly the PS-EXE header from offset 0x10

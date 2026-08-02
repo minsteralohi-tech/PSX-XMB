@@ -25,6 +25,7 @@ extern "C" {
 
 typedef enum {
 	GAMEID_IDLE = 0,   /* nothing read yet, or the lid is open   */
+	GAMEID_READING,    /* disc spun up, blocking read in progress */
 	GAMEID_FOUND,      /* id[] holds a boot name                 */
 	GAMEID_NO_DISC,    /* disc unreadable or not ISO9660         */
 	GAMEID_UNKNOWN,    /* readable, but no usable BOOT= line     */
