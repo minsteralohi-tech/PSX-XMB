@@ -178,6 +178,7 @@ addBinaryFile("${RELEASE_NAME}" bgm1Sound assets/ps3xmb.vag)
 # settings list) follows automatically.
 #addBinaryFile("${RELEASE_NAME}" bgm3Sound assets/sanctuary.vag)
 addBinaryFile("${RELEASE_NAME}" spuTestSound assets/spu.vag)
+addBinaryFile("${RELEASE_NAME}" notifySound assets/notify.vag)
 
 # The Fast Boot loader (cdloader.exe) embedded as a raw PS-EXE blob, launched
 # by launchLoader() in fastboot.c. Kept self-contained inside our .exe - no
