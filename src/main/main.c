@@ -87,17 +87,22 @@ int main(int argc, const char **argv) {
 	initSystemHUD();
 	enterMainMenu(&ctx, &state, 0);
 
-	// One ISO9660 sector, reused by the game ID reader. Static rather than a
-	// local: 2 KB is far more than this stack wants to carry.
+#if GAMEID_ENABLED
+	// Buffer for SYSTEM.CNF. Static rather than a local: 2 KB is far more
+	// than this stack wants to carry.
 	static uint8_t gameIdScratch[GAMEID_SCRATCH_SIZE];
+#endif
 
+#if GAMEID_ENABLED
 	gameIdInit();
+#endif
 
 	for (;;) {
 		uint16_t buttons = pollController(0) | pollController(1);
 
-		// Watch the CD lid. Cheap on almost every frame - see gameid.h.
+#if GAMEID_ENABLED
 		gameIdPoll(gameIdScratch, sizeof(gameIdScratch));
+#endif
 
 		beginFrame(&ctx);
 
@@ -126,8 +131,10 @@ int main(int argc, const char **argv) {
 			// costs a visible pause, and detecting the lid automatically
 			// would mean driving the CD-ROM behind the BIOS's back, which
 			// crashes the dashboard - see the note in gameid.c.
+#if GAMEID_ENABLED
 			if (state.buttonsPressed & PAD_BTN_R1)
 				gameIdRequestScan();
+#endif
 
 			if (!isXMBActive()) {
 				char toggleLine[64];
@@ -149,7 +156,9 @@ int main(int argc, const char **argv) {
 			}
 		}
 
+#if GAMEID_ENABLED
 		drawGameIdNotice(&ctx);
+#endif
 
 		endFrame(&ctx);
 	}

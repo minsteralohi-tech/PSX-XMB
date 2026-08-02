@@ -18,6 +18,41 @@
  * and cut it at the ';' before the version suffix - so both report an
  * identical string for the same disc.
  *
+ * STATUS: DISABLED (GAMEID_ENABLED is 0 in gameid.h)
+ * -------------------------------------------------
+ * Three approaches have now been tried and all three crashed or failed on a
+ * real console:
+ *
+ *   1. Driving the CD-ROM registers directly - SetLoc/SetMode/ReadN plus a
+ *      hand-written ISO9660 directory walk. Worked on emulators, failed on
+ *      every real console. Emulators are forgiving about command timing, the
+ *      INT1 handshake and the DRQ/data-FIFO protocol; hardware is not.
+ *
+ *   2. BIOS file I/O (_96_init + open/read/close on "cdrom:") while still
+ *      polling the shell-open flag directly for lid detection. Crashed on
+ *      both hardware and emulator: the retail BIOS keeps its own CD-ROM
+ *      interrupt handler live, and acknowledging interrupt flags behind its
+ *      back makes it fault.
+ *
+ *   3. BIOS file I/O only, no register access at all, one scan after boot.
+ *      Still crashed immediately.
+ *
+ * (3) failing points at the BIOS call itself rather than at any interaction.
+ * The most likely cause is that A0(0x54) is not _96_init on this kernel: a
+ * wrong table index calls an arbitrary kernel routine, which is exactly the
+ * failure mode that also left bios_reinit.c unfinished. That index needs to
+ * be confirmed against a disassembled BIOS before this is tried again.
+ *
+ * Worth noting what does NOT transfer here: tonyhax and cdloader both read
+ * SYSTEM.CNF successfully, but they run at boot, as the only program on the
+ * machine, with the BIOS in its freshly initialised state and nothing else
+ * using the CD-ROM. This dashboard is a long-running program that also owns a
+ * CD audio player, so it is a different problem.
+ *
+ * jdfr228's PS1-Disc-Based-Game-ID does not solve it either: it is a set of
+ * BIOS patches that hook parseConfig() inside the kernel, which requires
+ * reflashing the BIOS chip. It cannot be called from a program.
+ *
  * HOW IT WORKS
  * ------------
  *   1. Poll the drive's shell-open flag every frame (cheap: one GetStat).

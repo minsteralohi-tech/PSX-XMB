@@ -9,6 +9,20 @@
 
 #pragma once
 
+/*
+ * DISABLED BY DEFAULT - the dashboard must boot.
+ *
+ * Set to 1 to compile the disc scan back in. Left off because every version
+ * tried so far has crashed on real hardware, and a dashboard that does not
+ * start is far worse than one without game names. See the analysis at the top
+ * of gameid.c before turning this on.
+ *
+ * The database, the lookup and the notification card are all finished and
+ * correct; the unsolved part is purely how to read SYSTEM.CNF from inside a
+ * running bare-metal program.
+ */
+#define GAMEID_ENABLED 0
+
 #include <stdint.h>
 
 #include "main/renderer.h"
