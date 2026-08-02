@@ -60,6 +60,14 @@ bool isBGMEnabled(void);
 int         getBGMCount(void);
 int         getBGMIndex(void);
 const char *getBGMName(int index);
+
+/*
+ * Whether a listed track is actually embedded in this build. Tracks can be
+ * dropped from CMakeLists.txt to free RAM; they stay in the list so they do
+ * not silently vanish, but the picker greys them out and selectBGM() refuses
+ * them. Returns 0 for an unavailable or out-of-range index.
+ */
+int bgmTrackAvailable(int index);
 // Switch to BGM track `index` (0..getBGMCount()-1). No-op if already current.
 void        selectBGM(int index);
 

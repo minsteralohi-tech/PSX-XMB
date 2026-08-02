@@ -61,12 +61,17 @@ extern const uint8_t spuTestSound[];
 // in the two tables below. Nothing else needs changing: BGM_COUNT, the SPU
 // slot size and the Music settings list are all derived from them.
 extern const uint8_t bgm1Sound[];
-extern const uint8_t bgm2Sound[];
 
 // All selectable BGM tracks. They share a single SPU RAM slot (sized for the
 // largest one in initSound()); selectBGM() swaps which one is loaded. To add
 // more later, embed the .vag via addBinaryFile() and add it here.
-static const uint8_t *const bgmTable[] = { bgm1Sound, bgm2Sound };
+//
+// A NULL entry is a track that is listed but not embedded in this build. It
+// stays visible in the Music picker, greyed out and unselectable, so removing
+// a track to free RAM does not make it silently disappear - see
+// bgmTrackAvailable(). "PS4 XMB" was dropped to make room for the Sony 4.1
+// BIOS shell; assets/ps4xmb.vag is still in the repo.
+static const uint8_t *const bgmTable[] = { bgm1Sound, NULL };
 static const char *const bgmNames[]    = { "PS3 XMB", "PS4 XMB" };
 #define BGM_COUNT ((int)(sizeof(bgmTable) / sizeof(bgmTable[0])))
 
@@ -143,6 +148,9 @@ void initSound(void) {
 	// into the SPU test tone that follows it.
 	uint32_t bgmSlotSize = 0;
 	for (int i = 0; i < BGM_COUNT; i++) {
+		if (!bgmTable[i])
+			continue;
+
 		const VAGHeader *h = (const VAGHeader *) bgmTable[i];
 		uint32_t aligned   = (swapEndian(h->dataSize) + 63) & ~((uint32_t) 63);
 		if (aligned > bgmSlotSize)
@@ -152,6 +160,17 @@ void initSound(void) {
 	bgmSoundOffset = offset;
 
 	// Load the currently-selected BGM into the slot (default: track 0).
+	// currentBGM defaults to 0, but be defensive: if track 0 were ever the
+	// one dropped from a build, this would otherwise upload from NULL.
+	if (!bgmTable[currentBGM]) {
+		for (int i = 0; i < BGM_COUNT; i++) {
+			if (bgmTable[i]) {
+				currentBGM = i;
+				break;
+			}
+		}
+	}
+
 	currentBGMData = bgmTable[currentBGM];
 	uploadVAG(currentBGMData, bgmSoundOffset);
 
@@ -218,6 +237,10 @@ void playTestTone(int channel) {
 void playBGM(void) {
 	if (!currentBGMData)
 		currentBGMData = bgmTable[currentBGM];
+
+	// Nothing to play if this build dropped the selected track.
+	if (!currentBGMData)
+		return;
 	const VAGHeader *header = (const VAGHeader *) currentBGMData;
 
 	uint32_t sampleRate = swapEndian(header->sampleRate);
@@ -268,6 +291,13 @@ bool isBGMEnabled(void) {
 }
 
 int getBGMCount(void) { return BGM_COUNT; }
+
+int bgmTrackAvailable(int index) {
+	if (index < 0 || index >= BGM_COUNT)
+		return 0;
+
+	return bgmTable[index] != NULL;
+}
 int getBGMIndex(void) { return currentBGM; }
 
 const char *getBGMName(int index) {
@@ -277,7 +307,10 @@ const char *getBGMName(int index) {
 }
 
 void selectBGM(int index) {
-	if (index < 0 || index >= BGM_COUNT || index == currentBGM)
+	// Refuse a track that is not in this build; the picker greys it out, but
+	// nothing should depend on the UI for correctness.
+	if (index < 0 || index >= BGM_COUNT || !bgmTable[index] ||
+	    index == currentBGM)
 		return;
 
 	currentBGM     = index;

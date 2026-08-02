@@ -29,6 +29,16 @@ void runUniROMLauncher(
 	const MenuItem *item
 );
 
+/*
+ * Tools -> Sony 4.1 BIOS. Unproven, so its screen exposes the hand-off
+ * options (Triangle: erase RAM, Square: BIOS Exec) instead of fixing them.
+ */
+void runSony41Bios(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+);
+
 /* Tools -> 240p Test Suite. */
 void run240pSuite(
 	RenderContext  *ctx,

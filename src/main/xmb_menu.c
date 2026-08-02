@@ -59,6 +59,7 @@ typedef struct {
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
+static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item);
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
@@ -98,6 +99,7 @@ static const XMBEntry hwItems[] = {
 	{ "Pad Tester",         9, runPadTest,         true },
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },
 	{ "UniROM 8.0",         8, xmbLaunchUniROM,    true },
+	{ "Sony 4.1 BIOS",      8, xmbLaunchSony41Bios, true },
 	{ "240p Test Suite",   6, xmbLaunch240pSuite, true },
 };
 
@@ -194,6 +196,12 @@ static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuIte
 	run240pSuite(ctx, state, item);
 }
 
+/* Sony 4.1A BIOS shell. Unproven, so this one keeps the hand-off options on
+ * screen - see runSony41Bios() in launch_ui.c. */
+static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item) {
+	runSony41Bios(ctx, state, item);
+}
+
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item) {
 	// The confirmation screen, the plan validation and the handoff all live
 	// in launch_ui.c now, shared with Settings -> SIO Loader, so the two
@@ -206,6 +214,8 @@ static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *
 
 #define TEXT_WHITE  0x808080
 #define TEXT_DIM    0x404040
+// Listed but not present in this build - see bgmTrackAvailable().
+#define TEXT_DISABLED 0x202020
 
 /* Draw a small filled circle (~9 px) as a stack of flat mono quads - used as
  * the "currently active" marker in the theme list and the value columns, in
@@ -465,8 +475,14 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 				int ady = dyFx < 0 ? -dyFx : dyFx;
 				bool sel = musicSubMenuOpen && ady < 128;
 
-				printString(ctx, x + 14, y - 4,
-					sel ? TEXT_WHITE : TEXT_DIM,
+				// A BGM track listed but not embedded in this build is drawn
+				// darker than TEXT_DIM and never highlights, so it reads as
+				// unavailable rather than broken. See bgmTrackAvailable().
+				bool avail = !isBGM || bgmTrackAvailable(j);
+				uint32_t col = !avail ? TEXT_DISABLED
+				             : (sel ? TEXT_WHITE : TEXT_DIM);
+
+				printString(ctx, x + 14, y - 4, col,
 					isBGM ? getBGMName(j) : getSFXSetName(j));
 				if (j == applied)
 					drawDisc(getCurrentChain(ctx), x + 6, y - 1, TEXT_WHITE);
@@ -627,11 +643,29 @@ void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 			bool isBGM = (musicOptIndex == 0);
 			int cnt = isBGM ? getBGMCount() : getSFXSetCount();
 
+			// Step over any track this build does not contain, so the
+			// cursor never rests on a greyed-out entry.
 			if (nav & PAD_BTN_UP) {
-				if (musicSubIndex > 0) { musicSubIndex--; playScrollSound(); }
+				int n = musicSubIndex;
+				while (n > 0) {
+					n--;
+					if (!isBGM || bgmTrackAvailable(n)) {
+						musicSubIndex = n;
+						playScrollSound();
+						break;
+					}
+				}
 			}
 			if (nav & PAD_BTN_DOWN) {
-				if (musicSubIndex < cnt - 1) { musicSubIndex++; playScrollSound(); }
+				int n = musicSubIndex;
+				while (n < cnt - 1) {
+					n++;
+					if (!isBGM || bgmTrackAvailable(n)) {
+						musicSubIndex = n;
+						playScrollSound();
+						break;
+					}
+				}
 			}
 			if ((state->buttonsPressed & PAD_BTN_CROSS) || (nav & PAD_BTN_RIGHT)) {
 				if (isBGM)

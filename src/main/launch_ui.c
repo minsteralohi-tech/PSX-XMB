@@ -30,6 +30,7 @@
 extern const uint8_t sioLoaderExe[];
 extern const uint8_t uniromExe[];
 extern const uint8_t suite240pExe[];
+extern const uint8_t sony41BiosExe[];
 
 /*
  * Per-app launch settings.
@@ -68,6 +69,20 @@ typedef struct {
 static const LaunchConfig SIO_LOADER_CONFIG = { 0, 0 };
 static const LaunchConfig UNIROM_CONFIG     = { 0, 0 };
 static const LaunchConfig SUITE240P_CONFIG  = { 1, 0 };
+
+/*
+ * The Sony 4.1A BIOS shell is UNPROVEN on hardware, so unlike the four above
+ * its entry does not fix the hand-off - the confirmation screen exposes the
+ * options so every combination can be tried without a rebuild. Once a working
+ * combination is known, put it here and switch it to the plain dialog.
+ *
+ * It loads at 0x8002F000, straight over this dashboard, so planEmbeddedApp()
+ * will always route it through the stage 1 trampoline; the Exec() option is
+ * therefore unavailable and planUseBiosExec() will refuse it. Starting point
+ * is erase-RAM on, matching the 240p suite, which is the other target that
+ * lands on top of the dashboard.
+ */
+static const LaunchConfig SONY41_CONFIG     = { 1, 0 };
 
 static void waitForRelease(void) {
 	while (pollController(0) | pollController(1))
@@ -239,6 +254,114 @@ static int confirmHandoff(
 }
 
 /*
+ * Test-mode confirmation, for a target whose working hand-off is not known
+ * yet. Same crystal dialog, plus live toggles and the plan it would use, so a
+ * failing combination can be identified on hardware without a rebuild.
+ */
+static int confirmHandoffTest(
+	RenderContext *ctx,
+	UIState       *state,
+	const char    *title,
+	const uint8_t *exe,
+	int           *eraseRam,
+	int           *biosExec,
+	AppLaunchPlan *plan
+) {
+	char line[52];
+	uint32_t accent, glow;
+
+	int boxW = 296;
+	int boxX = (320 - boxW) / 2;
+	int boxH = 150;
+	int boxY = (240 - boxH) / 2;
+
+	waitForRelease();
+
+	for (;;) {
+		uint16_t buttons = pollController(0) | pollController(1);
+
+		if (buttons & PAD_BTN_CIRCLE) {
+			playCancelSound();
+			waitForRelease();
+			return 0;
+		}
+
+		if (buttons & PAD_BTN_TRIANGLE) {
+			AppLaunchPlan retry;
+
+			if (planEmbeddedApp(exe, !*eraseRam, &retry) == APP_PLAN_OK) {
+				*eraseRam = !*eraseRam;
+
+				if (!planUseBiosExec(&retry, *biosExec))
+					*biosExec = 0;
+
+				*plan = retry;
+				playScrollSound();
+			}
+
+			waitForRelease();
+			continue;
+		}
+
+		if (buttons & PAD_BTN_SQUARE) {
+			if (planUseBiosExec(plan, !*biosExec)) {
+				*biosExec = !*biosExec;
+				playScrollSound();
+			}
+
+			waitForRelease();
+			continue;
+		}
+
+		if (buttons & PAD_BTN_CROSS) {
+			playConfirmSound();
+			break;
+		}
+
+		beginFrame(ctx);
+		renderXMB(ctx, state);
+
+		xmbGetAccentColor(&accent, &glow);
+		drawDialogCard(ctx, boxX, boxY, boxW, boxH, accent);
+
+		printString(ctx, boxX + 10, boxY + 8, 0xffffff, title);
+		printString(ctx, boxX + 10, boxY + 26, 0xffffff,
+			"You are exiting the PSX Dashboard.");
+		printString(ctx, boxX + 10, boxY + 40, 0xffffff,
+			"Reset the console to return to the menu");
+
+		snprintf(line, sizeof(line), "Target  %08lX - %08lX",
+			(unsigned long) plan->dest, (unsigned long) plan->destEnd);
+		printString(ctx, boxX + 10, boxY + 62, 0x808080, line);
+
+		snprintf(line, sizeof(line), "Source  %08lX   Arena %08lX",
+			(unsigned long) plan->src, (unsigned long) plan->arena);
+		printString(ctx, boxX + 10, boxY + 74, 0x808080, line);
+
+		snprintf(line, sizeof(line), "Path    %s",
+			plan->useStage1   ? "Stage 1 trampoline" :
+			plan->useBiosExec ? "BIOS Exec()"
+			                  : "Direct copy + jump");
+		printString(ctx, boxX + 10, boxY + 88, 0x1256e3, line);
+
+		snprintf(line, sizeof(line), "Erase RAM  %s      Exec()  %s",
+			*eraseRam ? "YES" : "no ", *biosExec ? "YES" : "no ");
+		printString(ctx, boxX + 10, boxY + 102, 0x1256e3, line);
+
+		printString(ctx, boxX + 10, boxY + 124, 0xffffff,
+			CH_PS1_CROSS_BUTTON ": OK  "
+			CH_PS1_CIRCLE_BUTTON ": Back  "
+			CH_PS1_TRIANGLE_BUTTON ": Erase  "
+			CH_PS1_SQUARE_BUTTON ": Exec");
+
+		endFrame(ctx);
+	}
+
+	waitForRelease();
+	return 1;
+}
+
+/*
  * Shared entry point for every launcher menu item: plan, confirm, launch.
  */
 static void runLaunchScreen(
@@ -299,6 +422,42 @@ void run240pSuite(
 		suite240pExe,
 		&SUITE240P_CONFIG
 	);
+}
+
+void runSony41Bios(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+) {
+	(void) item;
+
+	int eraseRam = SONY41_CONFIG.eraseRam;
+	int biosExec = SONY41_CONFIG.biosExec;
+
+	AppLaunchPlan plan;
+	AppPlanResult result = planEmbeddedApp(sony41BiosExe, eraseRam, &plan);
+
+	if (result != APP_PLAN_OK) {
+		result = planEmbeddedApp(sony41BiosExe, !eraseRam, &plan);
+
+		if (result == APP_PLAN_OK)
+			eraseRam = !eraseRam;
+	}
+
+	if (result != APP_PLAN_OK) {
+		showPlanError(ctx, result);
+		return;
+	}
+
+	if (!planUseBiosExec(&plan, biosExec))
+		biosExec = 0;
+
+	if (!confirmHandoffTest(ctx, state, "SONY 4.1 BIOS",
+	                        sony41BiosExe, &eraseRam, &biosExec, &plan))
+		return;
+
+	/* Never returns. */
+	runAppLaunch(&plan);
 }
 
 void runUniROMLauncher(
