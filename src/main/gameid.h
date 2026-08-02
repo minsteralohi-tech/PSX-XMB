@@ -41,15 +41,25 @@ typedef struct {
 void gameIdInit(void);
 
 /*
- * Call once per frame from the main loop, with a 2048-byte scratch buffer.
+ * Call once per frame from the main loop, with a scratch buffer of at least
+ * GAMEID_SCRATCH_SIZE bytes.
  *
- * Cheap almost always: it polls the drive's shell flag a few times a second
- * and does nothing else. On a lid-open -> lid-closed transition it waits for
- * the drive to settle and then performs a blocking disc read of a few hundred
- * milliseconds. Every wait inside is bounded, so a missing or faulty drive
- * degrades to "no ID" rather than freezing the dashboard.
+ * Does nothing on almost every frame. It performs one disc scan a few seconds
+ * after boot, and thereafter only when gameIdRequestScan() has been called.
+ *
+ * There is NO automatic lid detection - see the note at the top of gameid.c.
+ * Watching the shell-open flag means issuing CD-ROM commands behind the live
+ * BIOS interrupt handler's back, which crashed the dashboard on both hardware
+ * and emulator.
  */
 void gameIdPoll(uint8_t *scratch, int scratchSize);
+
+/*
+ * Ask for a disc scan on the next frame. Costs a visible pause of a few
+ * hundred milliseconds, announced on screen while it happens, so call it in
+ * response to something the user did rather than on a timer.
+ */
+void gameIdRequestScan(void);
 
 const GameIdState *gameIdGet(void);
 

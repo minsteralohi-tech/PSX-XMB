@@ -192,77 +192,24 @@ extern int  biosClose(int fd);
 extern void bios96Init(void);
 extern void bios96Remove(void);
 
-#define CDROM_REG0 (*(volatile uint8_t *) 0x1f801800)
-#define CDROM_REG1 (*(volatile uint8_t *) 0x1f801801)
-#define CDROM_REG3 (*(volatile uint8_t *) 0x1f801803)
-
-#define STAT_BUSYSTS 0x80
-#define STAT_RSLRRDY 0x20
-
-/* Bit in the drive status byte returned by GetStat. */
-#define DRIVE_SHELL_OPEN 0x10
-
-#define CMD_GETSTAT 0x01
-
-#define SECTOR_SIZE 2048
-
-#define GUARD_SHORT 0x80000u
-#define GUARD_LONG  0x400000u
-
 /*
- * Drive status byte, or 0xff if the drive did not answer.
+ * NO DIRECT CD-ROM REGISTER ACCESS IN THIS FILE.
  *
- * This one command IS still issued directly: it is the cheapest possible way
- * to watch the lid, it runs several times a second, and unlike a data read it
- * is a single command with a single immediate response and no FIFO protocol.
- * Everything that actually reads the disc goes through the BIOS above.
+ * An earlier version polled the drive's shell-open flag with a hand-issued
+ * GetStat so it could notice the lid. That crashed the dashboard on both an
+ * emulator and real hardware, within seconds of boot and before any disc was
+ * ever read.
+ *
+ * The reason is that the retail BIOS installs its own CD-ROM interrupt
+ * handler at startup and is still live. Issuing commands and acknowledging
+ * interrupt flags behind its back races that handler: it sees flags cleared
+ * that it was about to act on, and faults. Nothing in the dashboard can make
+ * that safe short of taking the CD-ROM over completely, which would break the
+ * CD player and Fast Boot.
+ *
+ * So the disc is read only through the BIOS, and only at moments chosen by
+ * the dashboard rather than by a poll.
  */
-static uint8_t cdGetStat(void) {
-	unsigned guard = GUARD_SHORT;
-
-	while ((CDROM_REG0 & STAT_BUSYSTS) && --guard)
-		;
-
-	if (!guard)
-		return 0xff;
-
-	CDROM_REG0 = 1;
-	CDROM_REG3 = 0x1f;
-	CDROM_REG3 = 0x40;
-	CDROM_REG0 = 0;
-
-	CDROM_REG1 = CMD_GETSTAT;
-
-	guard = GUARD_LONG;
-
-	for (;;) {
-		CDROM_REG0 = 1;
-		uint8_t flags = CDROM_REG3 & 0x07;
-		CDROM_REG0 = 0;
-
-		if (flags)
-			break;
-
-		if (!--guard)
-			return 0xff;
-	}
-
-	uint8_t stat = 0xff;
-
-	CDROM_REG0 = 0;
-
-	if (CDROM_REG0 & STAT_RSLRRDY)
-		stat = CDROM_REG1;
-
-	while (CDROM_REG0 & STAT_RSLRRDY)
-		(void) CDROM_REG1;
-
-	CDROM_REG0 = 1;
-	CDROM_REG3 = 0x1f;
-	CDROM_REG0 = 0;
-
-	return stat;
-}
 
 /*
  * Pull the game ID out of a SYSTEM.CNF image.
@@ -406,79 +353,70 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 	current.state = name ? GAMEID_FOUND : GAMEID_UNLISTED;
 }
 
+/*
+ * Scan scheduling.
+ *
+ * The read is unavoidably blocking: the BIOS spins the drive up, seeks and
+ * retries, and there is no asynchronous form of open()/read(). A scan
+ * therefore costs a visible pause, so scans are deliberately rare and always
+ * announced - the card slides in saying "Reading disc..." a frame before the
+ * read starts, so the pause reads as loading rather than as a freeze.
+ *
+ * There is no lid polling. See the note at the top of this file: watching the
+ * shell flag means driving the CD-ROM registers behind the BIOS's back, which
+ * crashed the dashboard outright. A scan happens once shortly after boot, and
+ * thereafter only when something asks for one via gameIdRequestScan().
+ */
+static int scanCountdown = -1;
+
+void gameIdRequestScan(void) {
+	if (scanCountdown < 0)
+		scanCountdown = 2;   /* one frame to show the card, then read */
+}
+
 void gameIdPoll(uint8_t *scratch, int scratchSize) {
-	static bool wasOpen   = false;
-	static int  settle    = 0;
-	static int  pollDelay = 0;
+	static bool bootScanDone = false;
+	static int  bootDelay    = 180;
 
 	if (current.noticeTime > 0)
 		current.noticeTime--;
 
-	if (scratchSize < SECTOR_SIZE)
+	if (scratchSize < GAMEID_SCRATCH_SIZE)
 		return;
 
-	/*
-	 * The read is unavoidably blocking - the BIOS spins the drive up, seeks
-	 * and retries, and there is no asynchronous form of open()/read(). What
-	 * it must NOT do is block silently: on the first attempt the console
-	 * appeared to freeze for several seconds with nothing on screen.
-	 *
-	 * So the notification card is put on screen first, saying the disc is
-	 * being read, and the read happens on the following frame. The user sees
-	 * the slide-in animation, then the pause, then the game name - which
-	 * reads as loading rather than as a hang.
-	 */
-	if (settle > 0) {
-		settle--;
-
-		if (settle == 1) {
-			current.state      = GAMEID_READING;
-			current.id[0]      = '\0';
-			current.noticeTime = GAMEID_NOTICE_FRAMES;
+	/* One scan a few seconds after boot, once the splash is out of the way
+	 * and the drive has had time to settle. */
+	if (!bootScanDone) {
+		if (bootDelay > 0) {
+			bootDelay--;
 			return;
 		}
 
-		if (settle == 0) {
-			gameIdReadDisc(scratch, scratchSize);
+		bootScanDone = true;
+		gameIdRequestScan();
+	}
+
+	if (scanCountdown < 0)
+		return;
+
+	if (scanCountdown > 0) {
+		scanCountdown--;
+
+		if (scanCountdown == 0) {
+			/* Card first, read next frame - the user sees it appear, then
+			 * the pause, then the result. */
+			current.state      = GAMEID_READING;
+			current.id[0]      = '\0';
 			current.noticeTime = GAMEID_NOTICE_FRAMES;
 		}
 
 		return;
 	}
 
-	if (pollDelay > 0) {
-		pollDelay--;
-		return;
-	}
-
-	pollDelay = 15;
-
-	uint8_t stat = cdGetStat();
-
-	if (stat == 0xff)
-		return;
-
-	bool isOpen = (stat & DRIVE_SHELL_OPEN) != 0;
-
-	if (isOpen && !wasOpen) {
-		/* Lid opened: forget whatever was in the drive. */
-		current.state = GAMEID_IDLE;
-		current.id[0] = '\0';
-	}
-
-	if (!isOpen && wasOpen) {
-		/*
-		 * Lid closed. Give the drive time to spin up before asking the BIOS
-		 * for the file: reading immediately after the shell closes fails on
-		 * real hardware. Roughly a second and a half, then a frame to put
-		 * the "Reading disc" card up, then the read itself.
-		 */
-		settle = 90;
-	}
-
-	wasOpen = isOpen;
+	scanCountdown      = -1;
+	gameIdReadDisc(scratch, scratchSize);
+	current.noticeTime = GAMEID_NOTICE_FRAMES;
 }
-
 
 /* --- corner notification ------------------------------------------------ */
 

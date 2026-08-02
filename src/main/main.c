@@ -122,6 +122,13 @@ int main(int argc, const char **argv) {
 			if (state.buttonsPressed & PAD_BTN_SELECT)
 				toggleSystemHUD();
 
+			// R1 rescans the disc. Manual rather than automatic: reading it
+			// costs a visible pause, and detecting the lid automatically
+			// would mean driving the CD-ROM behind the BIOS's back, which
+			// crashes the dashboard - see the note in gameid.c.
+			if (state.buttonsPressed & PAD_BTN_R1)
+				gameIdRequestScan();
+
 			if (!isXMBActive()) {
 				char toggleLine[64];
 				snprintf(
