@@ -533,17 +533,29 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  */
 static bool cdDiscIsData(void) {
 	if (cdCommand(CMD_GETID, NULL, 0) != 3)
-		return false;
+		return true;           /* no clear answer - let the read decide */
 
 	int second = cdWaitInt(GUARD_CMD);
 
 	cdDrainAndAck();
 
-	if (second != 2)
-		return false;          /* INT5: no disc, or an audio disc */
-
-	if (cdResultLen >= 2 && (cdResult[1] & 0x80))
-		return false;          /* flags bit 7: missing or audio    */
+	/*
+	 * ONLY reject on the audio bit.
+	 *
+	 * The first version of this treated any INT5 as "not a data disc", which
+	 * broke detection completely - because INT5 is exactly what the drive
+	 * answers for an UNLICENSED disc, and every CD-R is unlicensed. Backups
+	 * stopped being detected at all.
+	 *
+	 * In the GetID response, flags bit 7 means missing-or-audio and bit 6
+	 * means unlicensed. Only bit 7 rules out a data track; bit 6 is normal
+	 * for a burned disc and must be ignored here. Anything ambiguous falls
+	 * through to the read, which is the reliable test.
+	 */
+	if (second == 2 || second == 5) {
+		if (cdResultLen >= 2 && (cdResult[1] & 0x80))
+			return false;      /* audio disc or empty drive */
+	}
 
 	return true;
 }

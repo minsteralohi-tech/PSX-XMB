@@ -357,7 +357,38 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		//                     so the icons tint to match whatever background is
 		//                     active without merging into it.
 		// The original Gouraud Waves theme keeps its fixed icy-blue gradient.
-		if (xmbIconStyle != 0) {
+		if (xmbIconStyle == 3) {
+			/*
+			 * Clear Crystal: the icon as a pane of tinted glass rather than
+			 * a coloured shape.
+			 *
+			 * "Crystal Glass" only recolours the icon - the artwork is still
+			 * opaque, so it reads as a solid gradient rather than something
+			 * you can see through. The difference here is that both passes
+			 * are drawn BLENDED, so the wallpaper shows through the icon
+			 * itself, which is what the memory card tiles do.
+			 *
+			 * Two passes because blending is a fixed 50% mix on this
+			 * hardware and one pass alone is too faint to read: the first
+			 * lays down a dark body, the second adds the bright specular
+			 * gradient on top of it. The selected icon gets a third pass so
+			 * it still stands out from its neighbours.
+			 */
+			uint32_t top, bot;
+			xmbGetIconGradient(&top, &bot);
+
+			int ix = x - size / 2;
+			int iy = ROW_Y - size / 2;
+
+			drawCategoryIconGradient(ctx, categories[i].icon,
+				ix, iy, size, true, bot, bot);
+			drawCategoryIconGradient(ctx, categories[i].icon,
+				ix, iy, size, true, top, bot);
+
+			if (sel)
+				drawCategoryIconGradient(ctx, categories[i].icon,
+					ix, iy, size, true, top, bot);
+		} else if (xmbIconStyle != 0) {
 			uint32_t top, bot;
 			xmbGetIconGradient(&top, &bot);
 			drawCategoryIconGradient(ctx, categories[i].icon,

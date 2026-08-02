@@ -461,7 +461,7 @@ static uint32_t paletteRGB(const uint8_t c[3]) {
 /* --- icon shading style ------------------------------------------------- */
 
 const char *const xmbIconStyleNames[XMB_ICON_STYLE_COUNT] = {
-	"Default", "Light Gradient", "Crystal Glass"
+	"Default", "Light Gradient", "Crystal Glass", "Clear Crystal"
 };
 uint8_t xmbIconStyle = 0;
 
@@ -481,7 +481,7 @@ static uint32_t iconMod(const uint8_t c[3], int num, int den, int floorv) {
 
 void xmbGetIconGradient(uint32_t *top, uint32_t *bot) {
 	const XMBPalette *pal = currentPalette();
-	if (xmbIconStyle == 2) {
+	if (xmbIconStyle == 2 || xmbIconStyle == 3) {
 		// Crystal Glass: the same material as the memory card tiles and the
 		// CD player's track blocks - a bright specular top falling to a deep
 		// tint, which reads as a lit glassy surface rather than a flat wash.

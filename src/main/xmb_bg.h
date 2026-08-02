@@ -86,7 +86,7 @@ extern uint8_t           xmbPaletteIndex; // 0 .. XMB_PALETTE_COUNT - 1
  * colour palette, so they read against whatever background is active without
  * merging into it.
  */
-#define XMB_ICON_STYLE_COUNT 3
+#define XMB_ICON_STYLE_COUNT 4
 extern const char *const xmbIconStyleNames[XMB_ICON_STYLE_COUNT];
 extern uint8_t           xmbIconStyle;   // 0 Default, 1 Light, 2 Dark
 
