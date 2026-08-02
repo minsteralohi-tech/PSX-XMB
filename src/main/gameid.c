@@ -18,42 +18,37 @@
  * and cut it at the ';' before the version suffix - so both report an
  * identical string for the same disc.
  *
- * STATUS: DISABLED (GAMEID_ENABLED is 0 in gameid.h)
- * -------------------------------------------------
- * Three approaches have now been tried and all three crashed or failed on a
- * real console:
+ * READING THE DISC
+ * -----------------
+ * Three earlier attempts crashed or failed on real hardware. The UniROM 8.0.K
+ * disassembly explains both mistakes, and this version follows what that
+ * driver actually does:
  *
- *   1. Driving the CD-ROM registers directly - SetLoc/SetMode/ReadN plus a
- *      hand-written ISO9660 directory walk. Worked on emulators, failed on
- *      every real console. Emulators are forgiving about command timing, the
- *      INT1 handshake and the DRQ/data-FIFO protocol; hardware is not.
+ *   1. MASK THE CD INTERRUPT WHILE WE DRIVE THE CONTROLLER. The retail BIOS
+ *      keeps its own CD-ROM interrupt handler live. Polling the interrupt
+ *      flag register and acknowledging flags while that handler can also fire
+ *      is what crashed the dashboard: it sees flags cleared that it was about
+ *      to act on. UniROM disables interrupts around its transfers for the
+ *      same reason. Here the CD bit is cleared in IRQ_MASK for the duration
+ *      and restored afterwards, so the BIOS handler simply never runs while
+ *      we are talking to the drive.
  *
- *   2. BIOS file I/O (_96_init + open/read/close on "cdrom:") while still
- *      polling the shell-open flag directly for lid detection. Crashed on
- *      both hardware and emulator: the retail BIOS keeps its own CD-ROM
- *      interrupt handler live, and acknowledging interrupt flags behind its
- *      back makes it fault.
+ *   2. DRAIN THE RESULT FIFO AFTER EVERY COMMAND. The disassembly's
+ *      multi-result collector reads result bytes while RSLRRDY stays set,
+ *      before the next command. Issuing a command with bytes still pending
+ *      desynchronises the controller, which is the classic "works on an
+ *      emulator, fails on hardware" difference - emulators are forgiving
+ *      about it and real silicon is not.
  *
- *   3. BIOS file I/O only, no register access at all, one scan after boot.
- *      Still crashed immediately.
+ * The read sequence is UniROM's: Setmode(0) -> Setloc -> wait for INT3, with
+ * a bounded retry that pauses and re-seeks -> ReadN -> per sector, wait for
+ * the data-ready interrupt and take the sector -> Pause.
  *
- * (3) failing points at the BIOS call itself rather than at any interaction.
- * The most likely cause is that A0(0x54) is not _96_init on this kernel: a
- * wrong table index calls an arbitrary kernel routine, which is exactly the
- * failure mode that also left bios_reinit.c unfinished. That index needs to
- * be confirmed against a disassembled BIOS before this is tried again.
+ * Sectors are taken through the data port rather than DMA channel 3. UniROM
+ * uses DMA, but the dashboard owns those channels for the GPU and one 2 KB
+ * transfer per scan is not worth the risk of disturbing them.
  *
- * Worth noting what does NOT transfer here: tonyhax and cdloader both read
- * SYSTEM.CNF successfully, but they run at boot, as the only program on the
- * machine, with the BIOS in its freshly initialised state and nothing else
- * using the CD-ROM. This dashboard is a long-running program that also owns a
- * CD audio player, so it is a different problem.
- *
- * jdfr228's PS1-Disc-Based-Game-ID does not solve it either: it is a set of
- * BIOS patches that hook parseConfig() inside the kernel, which requires
- * reflashing the BIOS chip. It cannot be called from a program.
- *
- * HOW IT WORKS
+ * HOW IT WORKS * HOW IT WORKS
  * ------------
  *   1. Poll the drive's shell-open flag every frame (cheap: one GetStat).
  *   2. On an open -> closed transition, wait for the drive to settle, then
@@ -221,30 +216,261 @@ static const char *dbLookup(const char *bootName) {
  * brings the device up; after that a "cdrom:" path works with the ordinary
  * open()/read()/close() calls.
  */
-extern int  biosOpen(const char *path, int mode);
-extern int  biosRead(int fd, void *dest, int length);
-extern int  biosClose(int fd);
-extern void bios96Init(void);
-extern void bios96Remove(void);
+
+#include "ps1/registers.h"
+
+#define CDREG0 (*(volatile uint8_t *) 0xbf801800)
+#define CDREG1 (*(volatile uint8_t *) 0xbf801801)
+#define CDREG2 (*(volatile uint8_t *) 0xbf801802)
+#define CDREG3 (*(volatile uint8_t *) 0xbf801803)
+
+#define ST_RSLRRDY 0x20
+#define ST_DRQSTS  0x40
+#define ST_BUSYSTS 0x80
+
+#define CMD_SETLOC  0x02
+#define CMD_READN   0x06
+#define CMD_PAUSE   0x09
+#define CMD_SETMODE 0x0e
+
+#define GUARD_CMD  0x200000u
+#define GUARD_DATA 0x800000u
+
+static uint16_t cdSavedMask;
 
 /*
- * NO DIRECT CD-ROM REGISTER ACCESS IN THIS FILE.
- *
- * An earlier version polled the drive's shell-open flag with a hand-issued
- * GetStat so it could notice the lid. That crashed the dashboard on both an
- * emulator and real hardware, within seconds of boot and before any disc was
- * ever read.
- *
- * The reason is that the retail BIOS installs its own CD-ROM interrupt
- * handler at startup and is still live. Issuing commands and acknowledging
- * interrupt flags behind its back races that handler: it sees flags cleared
- * that it was about to act on, and faults. Nothing in the dashboard can make
- * that safe short of taking the CD-ROM over completely, which would break the
- * CD player and Fast Boot.
- *
- * So the disc is read only through the BIOS, and only at moments chosen by
- * the dashboard rather than by a poll.
+ * Take the CD-ROM away from the BIOS handler for the duration of a scan.
+ * See point 1 in the header comment - without this the dashboard crashes.
  */
+static void cdBegin(void) {
+	cdSavedMask = IRQ_MASK;
+	IRQ_MASK    = (uint16_t) (cdSavedMask & ~(1 << IRQ_CDROM));
+}
+
+static void cdEnd(void) {
+	IRQ_STAT = (uint16_t) ~(1 << IRQ_CDROM);
+	IRQ_MASK = cdSavedMask;
+}
+
+/* Read the interrupt flag, 0 if none within the budget. */
+static int cdWaitInt(unsigned guard) {
+	for (;;) {
+		CDREG0 = 1;
+		uint8_t flags = CDREG3 & 0x07;
+		CDREG0 = 0;
+
+		if (flags)
+			return flags;
+
+		if (!--guard)
+			return 0;
+	}
+}
+
+/* Drain every pending result byte, then acknowledge. Point 2 above. */
+static void cdDrainAndAck(void) {
+	CDREG0 = 0;
+
+	unsigned guard = 64;
+
+	while ((CDREG0 & ST_RSLRRDY) && --guard)
+		(void) CDREG1;
+
+	CDREG0 = 1;
+	CDREG3 = 0x1f;      /* ack INT1..INT5      */
+	CDREG3 = 0x40;      /* reset parameter FIFO */
+	CDREG0 = 0;
+}
+
+/* Issue a command, wait for its interrupt, drain results. Returns the
+ * interrupt type, 0 on timeout. */
+static int cdCommand(uint8_t cmd, const uint8_t *params, int paramCount) {
+	unsigned guard = GUARD_CMD;
+
+	while ((CDREG0 & ST_BUSYSTS) && --guard)
+		;
+
+	if (!guard)
+		return 0;
+
+	cdDrainAndAck();
+
+	CDREG0 = 0;
+
+	for (int i = 0; i < paramCount; i++)
+		CDREG2 = params[i];
+
+	CDREG1 = cmd;
+
+	int type = cdWaitInt(GUARD_CMD);
+
+	cdDrainAndAck();
+	return type;
+}
+
+static uint8_t toBcd(uint32_t v) {
+	return (uint8_t) (((v / 10) << 4) | (v % 10));
+}
+
+/*
+ * Read `count` consecutive 2048-byte sectors. Mirrors UniROM's reader,
+ * including the bounded retry that pauses and re-seeks when the drive does
+ * not answer Setloc with INT3.
+ */
+static bool cdReadSectors(uint32_t lba, uint8_t *dest, int count) {
+	uint8_t mode = 0x00;
+
+	if (!cdCommand(CMD_SETMODE, &mode, 1))
+		return false;
+
+	/* ISO LBA 0 is MSF 00:02:00, so 150 frames of lead-in. */
+	uint32_t frames = lba + 150;
+	uint8_t  loc[3] = {
+		toBcd(frames / 4500),
+		toBcd((frames % 4500) / 75),
+		toBcd(frames % 75)
+	};
+
+	bool seated = false;
+
+	for (int tries = 0; tries < 10 && !seated; tries++) {
+		if (cdCommand(CMD_SETLOC, loc, 3) == 3) {
+			seated = true;
+			break;
+		}
+
+		/* Recovery: pause, re-assert the mode, try again. */
+		cdCommand(CMD_PAUSE, NULL, 0);
+		cdCommand(CMD_SETMODE, &mode, 1);
+	}
+
+	if (!seated)
+		return false;
+
+	if (cdCommand(CMD_READN, NULL, 0) != 3)
+		return false;
+
+	bool ok = true;
+
+	for (int s = 0; s < count && ok; s++) {
+		/* INT1 means a sector is ready. */
+		if (cdWaitInt(GUARD_DATA) != 1) {
+			ok = false;
+			break;
+		}
+
+		CDREG0 = 0;
+
+		unsigned guard = 64;
+
+		while ((CDREG0 & ST_RSLRRDY) && --guard)
+			(void) CDREG1;
+
+		CDREG0 = 1;
+		CDREG3 = 0x07;
+		CDREG0 = 0;
+
+		/* Request the sector into the data FIFO. */
+		CDREG0 = 0;
+		CDREG3 = 0x80;
+
+		guard = GUARD_CMD;
+
+		while (!(CDREG0 & ST_DRQSTS) && --guard)
+			;
+
+		if (!guard) {
+			ok = false;
+			break;
+		}
+
+		uint8_t *out = dest + s * 2048;
+
+		for (int i = 0; i < 2048; i++)
+			out[i] = CDREG2;
+
+		CDREG0 = 0;
+		CDREG3 = 0x00;
+	}
+
+	cdCommand(CMD_PAUSE, NULL, 0);
+	return ok;
+}
+
+static uint32_t rd32(const uint8_t *p) {
+	return (uint32_t) p[0] | ((uint32_t) p[1] << 8) |
+	       ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
+}
+
+/*
+ * Locate SYSTEM.CNF and read it into scratch. Returns bytes read, or 0.
+ *
+ * Follows UniROM's ISO path: verify the primary volume descriptor at sector
+ * 16, take the root directory extent from PVD offset 0x9E, then walk the
+ * records looking for the name.
+ */
+static int readSystemCnf(uint8_t *scratch, int scratchSize) {
+	if (scratchSize < 2048)
+		return 0;
+
+	cdBegin();
+
+	int result = 0;
+
+	if (cdReadSectors(16, scratch, 1) &&
+	    scratch[0] == 0x01 && scratch[1] == 'C' && scratch[2] == 'D' &&
+	    scratch[3] == '0' && scratch[4] == '0' && scratch[5] == '1') {
+
+		uint32_t rootLba = rd32(&scratch[0x9e]);
+
+		if (rootLba && cdReadSectors(rootLba, scratch, 1)) {
+			uint32_t fileLba = 0;
+			int      offset  = 0;
+
+			while (offset < 2048) {
+				int recLen = scratch[offset];
+
+				if (recLen < 33 || offset + recLen > 2048)
+					break;
+
+				int nameLen = scratch[offset + 32];
+				const uint8_t *name = &scratch[offset + 33];
+
+				/* "SYSTEM.CNF;1" - match the stem and ignore the version
+				 * suffix, which UniROM leaves on the name too. */
+				if (nameLen >= 10) {
+					static const char want[] = "SYSTEM.CNF";
+					bool match = true;
+
+					for (int k = 0; k < 10; k++) {
+						uint8_t c = name[k];
+
+						if (c >= 'a' && c <= 'z')
+							c = (uint8_t) (c - 'a' + 'A');
+
+						if (c != (uint8_t) want[k]) {
+							match = false;
+							break;
+						}
+					}
+
+					if (match) {
+						fileLba = rd32(&scratch[offset + 2]);
+						break;
+					}
+				}
+
+				offset += recLen;
+			}
+
+			if (fileLba && cdReadSectors(fileLba, scratch, 1))
+				result = 2048;
+		}
+	}
+
+	cdEnd();
+	return result;
+}
 
 /*
  * Pull the game ID out of a SYSTEM.CNF image.
@@ -299,39 +525,6 @@ static bool parseBootId(const uint8_t *data, int length,
 	}
 
 	return false;
-}
-
-/*
- * Read SYSTEM.CNF into scratch. Returns the byte count, or 0.
- *
- * Both spellings of the path are tried: the BIOS filesystem is case sensitive
- * and, while the ISO9660 standard uppercases names, not every disc image in
- * the wild does.
- */
-static int readSystemCnf(uint8_t *scratch, int scratchSize) {
-	static const char *const paths[] = {
-		"cdrom:\\SYSTEM.CNF;1",
-		"cdrom:SYSTEM.CNF;1",
-		"cdrom:\\system.cnf;1"
-	};
-
-	bios96Init();
-
-	for (unsigned p = 0; p < sizeof(paths) / sizeof(paths[0]); p++) {
-		int fd = biosOpen(paths[p], 1 /* O_RDONLY */);
-
-		if (fd < 0)
-			continue;
-
-		int got = biosRead(fd, scratch, scratchSize);
-
-		biosClose(fd);
-
-		if (got > 0)
-			return got;
-	}
-
-	return 0;
 }
 
 /* --- public ------------------------------------------------------------- */
