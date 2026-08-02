@@ -69,6 +69,131 @@
 
 static GameIdState current;
 
+/* --- game name database ------------------------------------------------- *
+ *
+ * Built by tools/makeGameDb.py from assets/PSX_ID.txt; see that file for the
+ * layout. Keys pack a prefix index and the disc number into 32 bits, so a
+ * lookup is an integer binary search over 1404 entries - about 11 probes,
+ * with no string compares and no ID text stored at all.
+ */
+extern const uint8_t gameDbData[];
+
+#define DB_PREFIX_COUNT 8
+
+static const char *const dbPrefixes[DB_PREFIX_COUNT] = {
+	"SLUS", "SCUS", "SLES", "SCES", "SLPS", "SCPS", "SLPM", "SCAJ"
+};
+
+static uint16_t dbRead16(const uint8_t *p) {
+	return (uint16_t) ((uint16_t) p[0] | ((uint16_t) p[1] << 8));
+}
+
+static uint32_t dbRead32(const uint8_t *p) {
+	return (uint32_t) p[0] | ((uint32_t) p[1] << 8) |
+	       ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
+}
+
+/*
+ * Turn a boot name such as "SLUS_004.02" into the packed key the table uses.
+ * Returns false for anything that is not <4 letters><separator><5 digits>.
+ */
+static bool dbPackKey(const char *bootName, uint32_t *key) {
+	char prefix[5];
+	int  i;
+
+	for (i = 0; i < 4; i++) {
+		char c = bootName[i];
+
+		if (c >= 'a' && c <= 'z')
+			c = (char) (c - 'a' + 'A');
+
+		if (c < 'A' || c > 'Z')
+			return false;
+
+		prefix[i] = c;
+	}
+
+	prefix[4] = '\0';
+
+	int index = -1;
+
+	for (i = 0; i < DB_PREFIX_COUNT; i++) {
+		const char *p = dbPrefixes[i];
+
+		if (p[0] == prefix[0] && p[1] == prefix[1] &&
+		    p[2] == prefix[2] && p[3] == prefix[3]) {
+			index = i;
+			break;
+		}
+	}
+
+	if (index < 0)
+		return false;
+
+	// Collect the digits, ignoring the '_', '-' and '.' separators that the
+	// boot name and the printed ID use differently: SLUS_004.02 and
+	// SLUS-00402 are the same disc.
+	uint32_t number = 0;
+	int      digits = 0;
+
+	for (i = 4; bootName[i] && digits < 5; i++) {
+		char c = bootName[i];
+
+		if (c == '_' || c == '-' || c == '.')
+			continue;
+
+		if (c < '0' || c > '9')
+			return false;
+
+		number = number * 10 + (uint32_t) (c - '0');
+		digits++;
+	}
+
+	if (digits != 5)
+		return false;
+
+	*key = ((uint32_t) index << 27) | (number & 0x07ffffffu);
+	return true;
+}
+
+/* Look up a boot name. Returns the game name, or NULL if not in the table. */
+static const char *dbLookup(const char *bootName) {
+	if (gameDbData[0] != 'P' || gameDbData[1] != 'S' ||
+	    gameDbData[2] != 'X' || gameDbData[3] != 'G')
+		return NULL;
+
+	uint32_t key;
+
+	if (!dbPackKey(bootName, &key))
+		return NULL;
+
+	int count = (int) dbRead16(&gameDbData[4]);
+
+	if (count <= 0)
+		return NULL;
+
+	const uint8_t *table = &gameDbData[8];
+	const uint8_t *blob  = table + (unsigned) count * 6u;
+
+	int lo = 0, hi = count - 1;
+
+	while (lo <= hi) {
+		int mid = (lo + hi) / 2;
+		const uint8_t *entry = table + (unsigned) mid * 6u;
+		uint32_t probe = dbRead32(entry);
+
+		if (probe == key)
+			return (const char *) (blob + dbRead16(entry + 4));
+
+		if (probe < key)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+
+	return NULL;
+}
+
 /* --- low level ---------------------------------------------------------- */
 
 static void cdAckAll(void) {
@@ -381,14 +506,42 @@ static void gameIdReadDisc(uint8_t *scratch) {
 		return;
 	}
 
+	char bootName[32];
+
 	if (!cdReadSector(lba, scratch) ||
-	    !parseBootId(scratch, current.id, sizeof(current.id))) {
+	    !parseBootId(scratch, bootName, sizeof(bootName))) {
 		current.state = GAMEID_UNKNOWN;
 		current.id[0] = '\0';
 		return;
 	}
 
-	current.state = GAMEID_FOUND;
+	// Only the game name is interesting on screen - "SLUS-00402" tells the
+	// user nothing. A disc that is not in the table falls back to the raw
+	// boot name, which at least identifies an import or a homebrew disc.
+	const char *name = dbLookup(bootName);
+
+	if (name) {
+		int i = 0;
+
+		while (name[i] && i < (int) sizeof(current.id) - 1) {
+			current.id[i] = name[i];
+			i++;
+		}
+
+		current.id[i]  = '\0';
+		current.state  = GAMEID_FOUND;
+		return;
+	}
+
+	int i = 0;
+
+	while (bootName[i] && i < (int) sizeof(current.id) - 1) {
+		current.id[i] = bootName[i];
+		i++;
+	}
+
+	current.id[i] = '\0';
+	current.state = GAMEID_UNLISTED;
 }
 
 void gameIdPoll(uint8_t *scratch, int scratchSize) {
@@ -463,53 +616,68 @@ static uint32_t shade(uint32_t colour, int numerator, int denominator) {
 }
 
 /*
- * Small themed card in the top-right corner, using the same flat-tint
- * treatment as the launch dialogs so it does not look bolted on.
+ * Slide-in notification, PS4/PS5 style.
  *
- * Drawn last, over whatever screen is up, and it fades out on its own - a
- * disc insertion should not interrupt what the user was doing.
+ * One line, the game name only - the raw ID told the user nothing. It eases
+ * in from off the right edge, holds, then eases back out, so it never steals
+ * focus from whatever screen is up.
+ *
+ * slideFx is 0..256 (fully out .. fully in) and is driven here rather than in
+ * gameIdPoll(), because the animation should run at frame rate while the poll
+ * deliberately does not.
  */
 void drawGameIdNotice(RenderContext *ctx) {
-	if (current.noticeTime <= 0)
-		return;
+	static int slideFx = 0;
 
-	const char *label;
 	const char *value;
 
 	switch (current.state) {
 	case GAMEID_FOUND:
-		label = "GAME ID";
+	case GAMEID_UNLISTED:
 		value = current.id;
 		break;
 
 	case GAMEID_NO_DISC:
-		label = "DISC";
-		value = "Not readable";
+		value = "Disc not readable";
 		break;
 
 	case GAMEID_UNKNOWN:
-		label = "DISC";
-		value = "No game ID";
+		value = "Unknown disc";
 		break;
 
 	default:
-		return;
+		value = NULL;
+		break;
 	}
 
+	// Ease toward fully in while the notice is live and fully out after,
+	// with the same >> 3 filter the XMB menu uses for its own glides.
+	int target = (value && current.noticeTime > 0) ? 256 : 0;
+
+	slideFx += (target - slideFx) >> 3;
+
+	// >> 3 never quite reaches the target; snap the last pixel so the card
+	// actually leaves the screen instead of parking one step short.
+	if (target == 0 && slideFx < 4)
+		slideFx = 0;
+	if (target == 256 && slideFx > 252)
+		slideFx = 256;
+
+	if (!slideFx || !value)
+		return;
+
 	int textW = getStringWidth(value);
-	int labelW = getStringWidth(label);
+	int boxW  = textW + 18;
 
-	if (labelW > textW)
-		textW = labelW;
+	if (boxW > 260)
+		boxW = 260;
 
-	int boxW = textW + 16;
-
-	if (boxW < 96)
-		boxW = 96;
-
-	int boxH = 34;
-	int boxX = 304 - boxW;      /* 16px safe margin from the right edge */
+	int boxH = 22;                       /* one line, slim */
 	int boxY = 16;
+
+	// Fully in: 16px from the right edge. Fully out: just past it.
+	int restX = 304 - boxW;
+	int boxX  = restX + ((320 - restX) * (256 - slideFx)) / 256;
 
 	uint32_t accent;
 
@@ -531,6 +699,5 @@ void drawGameIdNotice(RenderContext *ctx) {
 	drawRect(ctx, boxX + 1,        boxY + boxH - 1, boxW - 2, 1,        dim, true);
 	drawRect(ctx, boxX + boxW - 1, boxY + 1,        1,        boxH - 2, dim, true);
 
-	printString(ctx, boxX + 8, boxY + 5,  0x808080, label);
-	printString(ctx, boxX + 8, boxY + 19, 0xffffff, value);
+	printString(ctx, boxX + 9, boxY + 7, 0xffffff, value);
 }

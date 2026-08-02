@@ -27,12 +27,13 @@ typedef enum {
 	GAMEID_IDLE = 0,   /* nothing read yet, or the lid is open   */
 	GAMEID_FOUND,      /* id[] holds a boot name                 */
 	GAMEID_NO_DISC,    /* disc unreadable or not ISO9660         */
-	GAMEID_UNKNOWN     /* readable, but no usable BOOT= line     */
+	GAMEID_UNKNOWN,    /* readable, but no usable BOOT= line     */
+	GAMEID_UNLISTED    /* boot name read, but not in the table    */
 } GameIdResult;
 
 typedef struct {
 	GameIdResult state;
-	char         id[32];
+	char         id[64];   /* game name, or the boot name as a fallback */
 	int          noticeTime;   /* frames left to show the notification */
 } GameIdState;
 
