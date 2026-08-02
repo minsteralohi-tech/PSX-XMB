@@ -359,35 +359,32 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		// The original Gouraud Waves theme keeps its fixed icy-blue gradient.
 		if (xmbIconStyle == 3) {
 			/*
-			 * Clear Crystal: the icon as a pane of tinted glass rather than
-			 * a coloured shape.
+			 * Clear Crystal: the icon as tinted glass rather than a coloured
+			 * shape.
 			 *
-			 * "Crystal Glass" only recolours the icon - the artwork is still
-			 * opaque, so it reads as a solid gradient rather than something
-			 * you can see through. The difference here is that both passes
-			 * are drawn BLENDED, so the wallpaper shows through the icon
-			 * itself, which is what the memory card tiles do.
+			 * ONE blended pass, deliberately. The first attempt at this drew
+			 * two or three passes to make it "read better" - which was
+			 * exactly wrong: blending is a fixed 50% mix, so each extra pass
+			 * halves the remaining transparency and the icon comes back to
+			 * looking solid. That is why it still looked like the opaque
+			 * gradient style.
 			 *
-			 * Two passes because blending is a fixed 50% mix on this
-			 * hardware and one pass alone is too faint to read: the first
-			 * lays down a dark body, the second adds the bright specular
-			 * gradient on top of it. The selected icon gets a third pass so
-			 * it still stands out from its neighbours.
+			 * The tint is pushed bright instead, since a single 50% pass of
+			 * a dark colour would disappear against the wallpaper. Selection
+			 * is shown by a brighter tint rather than by more passes, for
+			 * the same reason.
 			 */
 			uint32_t top, bot;
 			xmbGetIconGradient(&top, &bot);
 
-			int ix = x - size / 2;
-			int iy = ROW_Y - size / 2;
+			if (!sel) {
+				/* Unselected panes sit further back: dimmer, less contrast. */
+				top = (top >> 1) & 0x7f7f7f;
+				bot = (bot >> 1) & 0x7f7f7f;
+			}
 
 			drawCategoryIconGradient(ctx, categories[i].icon,
-				ix, iy, size, true, bot, bot);
-			drawCategoryIconGradient(ctx, categories[i].icon,
-				ix, iy, size, true, top, bot);
-
-			if (sel)
-				drawCategoryIconGradient(ctx, categories[i].icon,
-					ix, iy, size, true, top, bot);
+				x - size / 2, ROW_Y - size / 2, size, true, top, bot);
 		} else if (xmbIconStyle != 0) {
 			uint32_t top, bot;
 			xmbGetIconGradient(&top, &bot);

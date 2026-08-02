@@ -241,7 +241,6 @@ static const char *dbLookup(const char *bootName) {
 #define CMD_PAUSE   0x09
 #define CMD_SETMODE 0x0e
 #define CMD_STOP    0x08
-#define CMD_GETID   0x1a
 
 /*
  * Spin budgets.
@@ -363,9 +362,19 @@ static bool cdReadSectors(uint32_t lba, uint8_t *dest, int count) {
 		toBcd(frames % 75)
 	};
 
+	/*
+	 * Two tries, not ten.
+	 *
+	 * UniROM's reader retries Setloc up to ten times because it is a one-shot
+	 * loader with nothing else to do. Here this sits INSIDE the scan's own
+	 * retry loop, so ten of these multiplied out to a hundred command
+	 * timeouts before a scan gave up - which is what made an audio CD lag
+	 * the whole dashboard for half a minute. The outer loop already handles
+	 * "the drive is not ready yet", and it does so without holding the frame.
+	 */
 	bool seated = false;
 
-	for (int tries = 0; tries < 10 && !seated; tries++) {
+	for (int tries = 0; tries < 2 && !seated; tries++) {
 		if (cdCommand(CMD_SETLOC, loc, 3) == 3) {
 			seated = true;
 			break;
@@ -516,50 +525,6 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
  * for an audio CD, or 0.
  */
-/*
- * Is there a data disc in the drive?
- *
- * This is the check that was missing, and it is why an audio CD made the
- * dashboard crawl. The scan's only test used to be "can I read sector 16" -
- * but an audio disc has no data track at all, so that failed every time, and
- * the retry loop then spent twenty-five seconds failing slowly. The CD player
- * identifies an audio disc in a second because it asks the drive what it is
- * holding instead of trying to read it.
- *
- * GetID answers INT3 and then either INT2 with the disc's licence bytes, or
- * INT5 for no disc / unlicensed / audio. Bit 7 of the flags byte marks a
- * missing or audio disc. Either way it is one quick command, and a "no" here
- * abandons the scan immediately rather than retrying.
- */
-static bool cdDiscIsData(void) {
-	if (cdCommand(CMD_GETID, NULL, 0) != 3)
-		return true;           /* no clear answer - let the read decide */
-
-	int second = cdWaitInt(GUARD_CMD);
-
-	cdDrainAndAck();
-
-	/*
-	 * ONLY reject on the audio bit.
-	 *
-	 * The first version of this treated any INT5 as "not a data disc", which
-	 * broke detection completely - because INT5 is exactly what the drive
-	 * answers for an UNLICENSED disc, and every CD-R is unlicensed. Backups
-	 * stopped being detected at all.
-	 *
-	 * In the GetID response, flags bit 7 means missing-or-audio and bit 6
-	 * means unlicensed. Only bit 7 rules out a data track; bit 6 is normal
-	 * for a burned disc and must be ignored here. Anything ambiguous falls
-	 * through to the read, which is the reliable test.
-	 */
-	if (second == 2 || second == 5) {
-		if (cdResultLen >= 2 && (cdResult[1] & 0x80))
-			return false;      /* audio disc or empty drive */
-	}
-
-	return true;
-}
-
 /* Drive status byte, or 0xff, without the begin/end wrapper. */
 static uint8_t cdStatRaw(void) {
 	if (cdCommand(CMD_GETSTAT, NULL, 0) && cdResultLen >= 1)
@@ -589,11 +554,20 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	cdCommand(CMD_INIT, NULL, 0);
 	cdCommand(CMD_GETSTAT, NULL, 0);
 
-	/* Ask what is in there before trying to read it. */
-	if (!cdDiscIsData()) {
-		cdEnd();
-		return GAMEID_NO_DATA_DISC;
-	}
+	/*
+	 * No GetID gate here, deliberately.
+	 *
+	 * Two attempts at using GetID to pre-classify the disc both broke
+	 * detection outright. The drive answers INT5 for an unlicensed disc, and
+	 * every CD-R is unlicensed - so backups were rejected before the read
+	 * even started. Narrowing the test to the audio flag did not help
+	 * either: pressed discs stopped being detected too, so whatever those
+	 * response bytes mean in practice, they are not something to gate on.
+	 *
+	 * The read itself is the reliable test, and it is the one that worked.
+	 * Audio CDs are handled by making failure cheap rather than by trying to
+	 * predict it - see the guard values and the attempt cap.
+	 */
 
 	int result = 0;
 
@@ -812,7 +786,7 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 #define SCAN_SETTLE_BOOT   180   /* 3s  - drive is usually already spinning */
 #define SCAN_SETTLE_LID    300   /* 5s  - cold start after a swap           */
 #define SCAN_RETRY_GAP     120   /* 2s  between attempts                    */
-#define SCAN_MAX_ATTEMPTS  10    /* ~25s total before giving up quietly     */
+#define SCAN_MAX_ATTEMPTS  8     /* ~20s total before giving up quietly     */
 
 static int scanSettle    = -1;   /* frames until the first attempt */
 static int scanAttempts  = 0;    /* attempts left, 0 = not scanning */
