@@ -209,6 +209,23 @@ addBinaryFile("${RELEASE_NAME}" suite240pExe assets/240p.exe)
 # so its menu entry exposes the hand-off options rather than fixing them.
 addBinaryFile("${RELEASE_NAME}" sony41BiosExe assets/sony41bios.exe)
 
+# Disc ID -> game name lookup table, built from the plain-text list in
+# assets/PSX_ID.txt. 1404 IDs and 1289 unique names in ~37 KB: keys are packed
+# into 32 bits so a lookup is an integer binary search, and names are
+# deduplicated because multi-disc releases share them.
+add_custom_command(
+	OUTPUT  "${PROJECT_BINARY_DIR}/assets/gamedb.dat"
+	COMMAND "${Python3_EXECUTABLE}"
+		"${PROJECT_SOURCE_DIR}/tools/makeGameDb.py"
+		"${PROJECT_SOURCE_DIR}/assets/PSX_ID.txt"
+		"${PROJECT_BINARY_DIR}/assets/gamedb.dat"
+	DEPENDS
+		"${PROJECT_SOURCE_DIR}/tools/makeGameDb.py"
+		"${PROJECT_SOURCE_DIR}/assets/PSX_ID.txt"
+	COMMENT "Building game ID database"
+)
+addBinaryFile("${RELEASE_NAME}" gameDbData "${PROJECT_BINARY_DIR}/assets/gamedb.dat")
+
 ## CD-ROM image
 
 configure_file(assets/cdreadme.txt  readme.txt      NEWLINE_STYLE CRLF)
