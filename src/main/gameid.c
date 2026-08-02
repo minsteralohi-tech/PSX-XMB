@@ -274,7 +274,7 @@ static int cdWaitInt(unsigned guard) {
 	}
 }
 
-/* Result bytes from the last command, for GetStat and GetTN. */
+/* Result bytes from the last command, for GetStat. */
 static uint8_t cdResult[8];
 static int     cdResultLen;
 
@@ -427,23 +427,7 @@ static uint32_t rd32(const uint8_t *p) {
  * records looking for the name.
  */
 #define CMD_GETSTAT 0x01
-#define CMD_GETTN   0x13
 #define CMD_INIT    0x0a
-
-/*
- * True if the drive reports an audio disc: GetTN answers with a track count
- * and the disc has no ISO9660 volume descriptor.
- */
-static bool cdIsAudioDisc(void) {
-	if (cdCommand(CMD_GETTN, NULL, 0) != 3 || cdResultLen < 3)
-		return false;
-
-	/* Response is stat, first track (BCD), last track (BCD). */
-	uint8_t last = cdResult[2];
-	int     lastTrack = ((last >> 4) & 0x0f) * 10 + (last & 0x0f);
-
-	return lastTrack > 0;
-}
 
 static int readSystemCnfOnce(uint8_t *scratch) {
 	int result = 0;
@@ -517,8 +501,6 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
  * for an audio CD, or 0.
  */
-#define GAMEID_AUDIO_DISC_MARKER (-2)
-
 static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < 2048)
 		return 0;
@@ -542,9 +524,14 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 		}
 	}
 
-	/* No ISO volume: it may still be a perfectly good audio CD. */
-	if (result == 0 && cdIsAudioDisc())
-		result = GAMEID_AUDIO_DISC_MARKER;
+	/*
+	 * Audio CD detection used to live here, using GetTN when no ISO volume
+	 * was found. It was removed: on real hardware it made the dashboard
+	 * stutter badly and sometimes took it down entirely. GetTN on a disc the
+	 * controller has not finished identifying is evidently not safe to issue
+	 * from this path, and an audio disc is something the CD player already
+	 * handles properly.
+	 */
 
 	cdEnd();
 	return result;
@@ -642,12 +629,6 @@ void gameIdClearNotice(void) {
 static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 	int got = readSystemCnf(scratch, scratchSize);
 
-	if (got == GAMEID_AUDIO_DISC_MARKER) {
-		current.state = GAMEID_AUDIO_CD;
-		current.id[0] = '\0';
-		return;
-	}
-
 	if (got <= 0) {
 		current.state = GAMEID_NO_DISC;
 		current.id[0] = '\0';
@@ -693,20 +674,52 @@ static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
  * crashed the dashboard outright. A scan happens once shortly after boot, and
  * thereafter only when something asks for one via gameIdRequestScan().
  */
-static int scanCountdown = -1;
+/*
+ * Scan scheduling.
+ *
+ * WHY THIS RETRIES INSTEAD OF WAITING A FIXED TIME
+ * ------------------------------------------------
+ * The first scan after boot always worked with a 3 second delay, and the one
+ * after a lid close always failed with the same delay - or with 4 seconds.
+ * The reason turned out to be that on boot the drive is already spinning:
+ * whatever launched the dashboard left it running. After a lid close it is
+ * starting from a dead stop and has to spin up AND re-read the table of
+ * contents, and how long that takes varies with the disc and the drive.
+ *
+ * So there is no correct fixed delay. Instead the scan retries: an initial
+ * settle, then an attempt every two seconds until the disc reads or the
+ * window runs out. A cold drive that needs fifteen seconds is fine.
+ *
+ * Failures are silent. The notification only ever appears when a name was
+ * actually found - reporting "Disc not readable" while the drive is still
+ * spinning up was the thing that made this feel broken, and it was never
+ * useful information.
+ */
+#define SCAN_SETTLE_BOOT   180   /* 3s  - drive is usually already spinning */
+#define SCAN_SETTLE_LID    300   /* 5s  - cold start after a swap           */
+#define SCAN_RETRY_GAP     120   /* 2s  between attempts                    */
+#define SCAN_MAX_ATTEMPTS  12    /* ~25s total before giving up quietly     */
+
+static int scanSettle    = -1;   /* frames until the first attempt */
+static int scanAttempts  = 0;    /* attempts left, 0 = not scanning */
 static int chimeDelay    = -1;
 
+static void gameIdStartScan(int settleFrames) {
+	scanSettle   = settleFrames;
+	scanAttempts = SCAN_MAX_ATTEMPTS;
+}
+
 void gameIdRequestScan(void) {
-	if (scanCountdown < 0)
-		scanCountdown = 2;   /* one frame to show the card, then read */
+	/* Manual R1: the user has decided the drive has had long enough, so go
+	 * almost immediately - but still retry, since they may be early. */
+	gameIdStartScan(30);
 }
 
 void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	static bool wasOpen   = false;
 	static bool primed    = false;
-	static int  bootDelay = 180;
+	static int  bootDelay = 60;
 	static int  pollDelay = 0;
-	static int  settle    = 0;
 
 	if (current.noticeTime > 0)
 		current.noticeTime--;
@@ -723,66 +736,46 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < GAMEID_SCRATCH_SIZE)
 		return;
 
-	/* Let the splash clear and the drive settle before the first scan. */
+	/* First scan, shortly after boot. */
 	if (bootDelay > 0) {
 		bootDelay--;
 
 		if (bootDelay == 0)
-			gameIdRequestScan();
+			gameIdStartScan(SCAN_SETTLE_BOOT);
 
 		return;
 	}
 
-	/* A scan is queued or in progress: that takes priority over polling. */
-	if (scanCountdown >= 0) {
-		if (scanCountdown > 0) {
-			scanCountdown--;
-
-			if (scanCountdown == 0) {
-				/* Card first, read next frame - the user sees it appear,
-				 * then the pause, then the result. */
-				current.state      = GAMEID_READING;
-				current.id[0]      = '\0';
-				current.noticeTime = GAMEID_NOTICE_FRAMES;
-			}
-
+	/* --- a scan is in progress ------------------------------------------ */
+	if (scanAttempts > 0) {
+		if (scanSettle > 0) {
+			scanSettle--;
 			return;
 		}
 
-		scanCountdown = -1;
+		scanAttempts--;
 		gameIdReadDisc(scratch, scratchSize);
-		current.noticeTime = GAMEID_NOTICE_FRAMES;
 
-		/*
-		 * Chime a second after the result rather than at either end of the
-		 * read. Playing it as the read starts sounds broken, because the
-		 * blocking read then stops everything mid-sample; playing it the
-		 * instant the read returns is jerky for the same reason, as the
-		 * machine is still catching up. A short delay lets the frame rate
-		 * settle first, and lands the sound under the finished card.
-		 */
-		chimeDelay = 60;
-		return;
-	}
+		if (current.state == GAMEID_FOUND ||
+		    current.state == GAMEID_UNLISTED) {
+			/* Success: this is the only path that shows anything. */
+			scanAttempts       = 0;
+			current.noticeTime = GAMEID_NOTICE_FRAMES;
+			chimeDelay         = 60;
+			return;
+		}
 
-	/* Waiting for a newly closed lid to spin up. */
-	if (settle > 0) {
-		settle--;
+		/* Not ready yet. Say nothing and try again shortly. */
+		current.state = GAMEID_IDLE;
+		current.id[0] = '\0';
 
-		if (settle == 0)
-			gameIdRequestScan();
+		if (scanAttempts > 0)
+			scanSettle = SCAN_RETRY_GAP;
 
 		return;
 	}
 
-	/*
-	 * Lid polling.
-	 *
-	 * This is safe now, where the version that crashed was not: cdPollStat()
-	 * goes through cdBegin()/cdEnd(), so the BIOS CD interrupt handler is
-	 * masked for the duration of the command and cannot race us. It is one
-	 * GetStat every ~20 frames, which is far cheaper than a read.
-	 */
+	/* --- otherwise, watch the lid --------------------------------------- */
 	if (pollDelay > 0) {
 		pollDelay--;
 		return;
@@ -790,12 +783,6 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 	pollDelay = 20;
 
-	/*
-	 * Once a disc has been reported there is nothing to look for except the
-	 * lid opening, and that is all this poll does. It keeps running rather
-	 * than stopping entirely because the open event is what arms the next
-	 * scan - but it never scans again on its own.
-	 */
 	uint8_t stat = cdPollStat();
 
 	if (stat == 0xff)
@@ -804,31 +791,22 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	bool isOpen = (stat & 0x10) != 0;   /* ShellOpen */
 
 	if (!primed) {
-		/* First reading: adopt it without reacting, so booting with the lid
-		 * shut does not immediately look like an insertion. */
+		/* Adopt the first reading without reacting, so booting with the lid
+		 * already shut does not look like an insertion. */
 		primed  = true;
 		wasOpen = isOpen;
 		return;
 	}
 
 	if (isOpen && !wasOpen) {
-		current.state = GAMEID_IDLE;
-		current.id[0] = '\0';
+		/* Lid opened: forget the old disc and stop showing its name. */
+		current.state      = GAMEID_IDLE;
+		current.id[0]      = '\0';
+		current.noticeTime = 0;
 	}
 
-	if (!isOpen && wasOpen) {
-		/*
-		 * Wait as long after a lid close as the dashboard waits after boot.
-		 *
-		 * 1.5s was not enough: closing the lid reported "Disc not readable",
-		 * and pressing R1 a few seconds later read the same disc fine. The
-		 * boot path has always worked, and the only difference was that it
-		 * waited 3 seconds. The drive is starting from a dead stop in both
-		 * cases, so it gets the same budget here - with a little extra,
-		 * since after a swap it also has to re-read the table of contents.
-		 */
-		settle = 240;
-	}
+	if (!isOpen && wasOpen)
+		gameIdStartScan(SCAN_SETTLE_LID);
 
 	wasOpen = isOpen;
 }
@@ -861,34 +839,18 @@ static uint32_t shade(uint32_t colour, int numerator, int denominator) {
 void drawGameIdNotice(RenderContext *ctx) {
 	static int slideFx = 0;
 
-	const char *value;
+	/*
+	 * Only a successful identification is ever shown.
+	 *
+	 * The failure states still exist so the scan loop can tell them apart,
+	 * but they never reach the screen: a card saying "Disc not readable"
+	 * while the drive is still spinning up was actively misleading, and the
+	 * retry a couple of seconds later usually succeeded anyway.
+	 */
+	const char *value = NULL;
 
-	switch (current.state) {
-	case GAMEID_FOUND:
-	case GAMEID_UNLISTED:
+	if (current.state == GAMEID_FOUND || current.state == GAMEID_UNLISTED)
 		value = current.id;
-		break;
-
-	case GAMEID_READING:
-		value = "Reading disc...";
-		break;
-
-	case GAMEID_AUDIO_CD:
-		value = "Audio CD";
-		break;
-
-	case GAMEID_NO_DISC:
-		value = "Disc not readable";
-		break;
-
-	case GAMEID_UNKNOWN:
-		value = "Unknown disc";
-		break;
-
-	default:
-		value = NULL;
-		break;
-	}
 
 	// Ease toward fully in while the notice is live and fully out after,
 	// with the same >> 3 filter the XMB menu uses for its own glides.
