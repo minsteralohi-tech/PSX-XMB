@@ -370,6 +370,42 @@ static void test240pSuite(void) {
 	CHECK(!(arenaStart < plan.destEnd && plan.dest < arenaEnd));
 }
 
+static void testSony41Bios(void) {
+	printf("Sony 4.1A BIOS shell (0x8002f000, 315392 bytes)\n");
+
+	/* Exactly the header of the shipped assets/sony41bios.exe. */
+	makeExe(0x8002f000, 0x8002f000, 0x4d000, 0, 0, 0x801fff00);
+
+	AppLaunchPlan plan;
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 1, &plan), APP_PLAN_OK);
+
+	/* Lands squarely on the dashboard, so the trampoline is mandatory and
+	 * Exec() is unavailable - the test screen's Square toggle must refuse. */
+	CHECK(plan.useStage1 == 1);
+	CHECK(plan.dest == 0x8002f000);
+	CHECK(plan.destEnd == 0x8007c000);
+	CHECK(plan.sp == 0x801fff00);
+	CHECK(planUseBiosExec(&plan, 1) == 0);
+
+	/* The arena must clear both the payload and the source blob. */
+	uint32_t aStart = plan.arena, aEnd = plan.arena + APP_ARENA_SIZE;
+	CHECK(!(aStart < plan.destEnd && plan.dest < aEnd));
+	CHECK(!(aStart < plan.src + plan.bodySize && plan.src < aEnd));
+
+	/* Erasing must not wipe the payload we just copied. */
+	CHECK(!fillsCover(&plan, plan.dest));
+	CHECK(!fillsCover(&plan, plan.destEnd - 4));
+	CHECK(!fillsCover(&plan, plan.arena));
+
+	/* ...and it should still clear the dashboard below it. */
+	CHECK(fillsCover(&plan, APP_RAM_BASE));
+
+	/* Without the erase it still plans, so both toggle positions are live. */
+	CHECK_RESULT(planEmbeddedApp(exeBuffer, 0, &plan), APP_PLAN_OK);
+	CHECK(plan.useStage1 == 1);
+	CHECK(plan.fillCount == 0);
+}
+
 static void testBiosExecSelection(void) {
 	printf("BIOS Exec() hand-off selection\n");
 
@@ -430,6 +466,7 @@ int main(void) {
 	testRejections();
 	testBssPushesArenaAside();
 	test240pSuite();
+	testSony41Bios();
 	testBiosExecSelection();
 	testPhysicalAddressesAreCanonicalised();
 

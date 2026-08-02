@@ -162,7 +162,13 @@ addBinaryFile("${RELEASE_NAME}" sfxPs4NavSound     assets/ps4_nav.vag)
 addBinaryFile("${RELEASE_NAME}" sfxPs4ConfirmSound assets/ps4_confirm.vag)
 addBinaryFile("${RELEASE_NAME}" sfxPs4CancelSound  assets/ps4_cancel.vag)
 addBinaryFile("${RELEASE_NAME}" bgm1Sound assets/ps3xmb.vag)
-addBinaryFile("${RELEASE_NAME}" bgm2Sound assets/ps4xmb.vag)
+# assets/ps4xmb.vag is deliberately NOT embedded: at 258,176 bytes it was the
+# next-largest thing that could be given up, this time to make room for the
+# Sony 4.1 BIOS shell below. The file is kept in assets/ and the track is kept
+# in the Music list (greyed out and unselectable) rather than silently
+# vanishing - re-add this line and drop UNSELECTABLE from bgmTable[] in
+# src/main/sound.c to bring it back.
+#addBinaryFile("${RELEASE_NAME}" bgm2Sound assets/ps4xmb.vag)
 # assets/sanctuary.vag is deliberately NOT embedded: at 371,760 bytes it was
 # the single largest thing that could be given up to make room for the 240p
 # Test Suite below. The file is kept in assets/ so the track can be brought
@@ -196,6 +202,11 @@ addBinaryFile("${RELEASE_NAME}" sioLoaderExe assets/sioloader.exe)
 # planet textures went from 8bpp to 4bpp. It loads at 0x80010000 - on top of
 # this dashboard - so it is always launched through the stage 1 trampoline.
 addBinaryFile("${RELEASE_NAME}" suite240pExe assets/240p.exe)
+
+# Sony 4.1A BIOS shell (ISO9660). Loads at 0x8002F000 - straight over this
+# dashboard - so it always takes the stage 1 trampoline. Unproven on hardware,
+# so its menu entry exposes the hand-off options rather than fixing them.
+addBinaryFile("${RELEASE_NAME}" sony41BiosExe assets/sony41bios.exe)
 
 ## CD-ROM image
 
