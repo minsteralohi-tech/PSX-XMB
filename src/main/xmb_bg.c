@@ -461,7 +461,7 @@ static uint32_t paletteRGB(const uint8_t c[3]) {
 /* --- icon shading style ------------------------------------------------- */
 
 const char *const xmbIconStyleNames[XMB_ICON_STYLE_COUNT] = {
-	"Default", "Light Gradient", "Dark Gradient"
+	"Default", "Light Gradient", "Crystal Glass"
 };
 uint8_t xmbIconStyle = 0;
 
@@ -482,10 +482,38 @@ static uint32_t iconMod(const uint8_t c[3], int num, int den, int floorv) {
 void xmbGetIconGradient(uint32_t *top, uint32_t *bot) {
 	const XMBPalette *pal = currentPalette();
 	if (xmbIconStyle == 2) {
-		// Dark: a deeper tint of the wave colour, floored so it stays clearly
-		// above the dark background instead of merging into it.
-		*top = iconMod(pal->crestB, 1, 3, 0x30);
-		*bot = iconMod(pal->crestA, 1, 4, 0x28);
+		// Crystal Glass: the same material as the memory card tiles and the
+		// CD player's track blocks - a bright specular top falling to a deep
+		// tint, which reads as a lit glassy surface rather than a flat wash.
+		//
+		// Follows the theme rather than only the wave palette, so it works on
+		// the backgrounds that have no palette of their own: Nebula 3 gives
+		// orange crystal, Cosmos violet, PS4 blue.
+		uint32_t accent;
+
+		xmbGetAccentColor(&accent, NULL);
+
+		uint32_t r = accent & 0xff;
+		uint32_t g = (accent >> 8) & 0xff;
+		uint32_t b = (accent >> 16) & 0xff;
+
+		// Highlight: lifted well past the base tint and toward white.
+		uint32_t hr = r * 5 / 2 + 0x38;
+		uint32_t hg = g * 5 / 2 + 0x38;
+		uint32_t hb = b * 5 / 2 + 0x38;
+
+		if (hr > 0xff) hr = 0xff;
+		if (hg > 0xff) hg = 0xff;
+		if (hb > 0xff) hb = 0xff;
+
+		// Shadow: deeper than the base, floored so the icon never merges
+		// into a dark background.
+		uint32_t sr = r * 3 / 4 + 0x1c;
+		uint32_t sg = g * 3 / 4 + 0x1c;
+		uint32_t sb = b * 3 / 4 + 0x1c;
+
+		*top = gp0_rgb((uint8_t) hr, (uint8_t) hg, (uint8_t) hb);
+		*bot = gp0_rgb((uint8_t) sr, (uint8_t) sg, (uint8_t) sb);
 	} else {
 		// Light (also the fallback): bright, light-tinted icons that pop.
 		*top = iconMod(pal->crestA, 1, 2, 0x44);

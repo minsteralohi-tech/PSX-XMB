@@ -241,6 +241,7 @@ static const char *dbLookup(const char *bootName) {
 #define CMD_PAUSE   0x09
 #define CMD_SETMODE 0x0e
 #define CMD_STOP    0x08
+#define CMD_GETID   0x1a
 
 /*
  * Spin budgets.
@@ -515,16 +516,72 @@ static int readSystemCnfOnce(uint8_t *scratch) {
  * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
  * for an audio CD, or 0.
  */
+/*
+ * Is there a data disc in the drive?
+ *
+ * This is the check that was missing, and it is why an audio CD made the
+ * dashboard crawl. The scan's only test used to be "can I read sector 16" -
+ * but an audio disc has no data track at all, so that failed every time, and
+ * the retry loop then spent twenty-five seconds failing slowly. The CD player
+ * identifies an audio disc in a second because it asks the drive what it is
+ * holding instead of trying to read it.
+ *
+ * GetID answers INT3 and then either INT2 with the disc's licence bytes, or
+ * INT5 for no disc / unlicensed / audio. Bit 7 of the flags byte marks a
+ * missing or audio disc. Either way it is one quick command, and a "no" here
+ * abandons the scan immediately rather than retrying.
+ */
+static bool cdDiscIsData(void) {
+	if (cdCommand(CMD_GETID, NULL, 0) != 3)
+		return false;
+
+	int second = cdWaitInt(GUARD_CMD);
+
+	cdDrainAndAck();
+
+	if (second != 2)
+		return false;          /* INT5: no disc, or an audio disc */
+
+	if (cdResultLen >= 2 && (cdResult[1] & 0x80))
+		return false;          /* flags bit 7: missing or audio    */
+
+	return true;
+}
+
+/* Drive status byte, or 0xff, without the begin/end wrapper. */
+static uint8_t cdStatRaw(void) {
+	if (cdCommand(CMD_GETSTAT, NULL, 0) && cdResultLen >= 1)
+		return cdResult[0];
+
+	return 0xff;
+}
+
+#define GAMEID_NO_DATA_DISC (-3)
+
 static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < 2048)
 		return 0;
 
 	cdBegin();
 
+	/* Lid open: nothing to do, and no point spinning through retries. */
+	uint8_t stat = cdStatRaw();
+
+	if (stat != 0xff && (stat & 0x10)) {
+		cdEnd();
+		return GAMEID_NO_DATA_DISC;
+	}
+
 	/* Reset the controller so it re-reads the table of contents. Without
 	 * this the first attempt after a swap sees the previous disc. */
 	cdCommand(CMD_INIT, NULL, 0);
 	cdCommand(CMD_GETSTAT, NULL, 0);
+
+	/* Ask what is in there before trying to read it. */
+	if (!cdDiscIsData()) {
+		cdEnd();
+		return GAMEID_NO_DATA_DISC;
+	}
 
 	int result = 0;
 
@@ -666,6 +723,14 @@ void gameIdClearNotice(void) {
 static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 	int got = readSystemCnf(scratch, scratchSize);
 
+	if (got == GAMEID_NO_DATA_DISC) {
+		/* Audio disc, no disc, or the lid is open. Distinct from a failed
+		 * read so the scan loop can stop instead of retrying. */
+		current.state = GAMEID_NO_DISC;
+		current.id[0] = '\0';
+		return;
+	}
+
 	if (got <= 0) {
 		current.state = GAMEID_NO_DISC;
 		current.id[0] = '\0';
@@ -792,6 +857,21 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 
 		scanAttempts--;
 		gameIdReadDisc(scratch, scratchSize);
+
+		if (current.state == GAMEID_NO_DISC) {
+			/*
+			 * The drive told us there is nothing readable in there - an
+			 * audio CD, an empty drive, or an open lid. Retrying cannot
+			 * change that answer, so stop now rather than grinding through
+			 * the rest of the window. This is what made an audio disc lag
+			 * the dashboard for half a minute.
+			 */
+			scanAttempts  = 0;
+			current.state = GAMEID_IDLE;
+			current.id[0] = '\0';
+			cdStopMotor();
+			return;
+		}
 
 		if (current.state == GAMEID_FOUND ||
 		    current.state == GAMEID_UNLISTED) {
