@@ -29,6 +29,13 @@ void runUniROMLauncher(
 	const MenuItem *item
 );
 
+/* Tools -> Sony 4.1 BIOS. */
+void runSony41Bios(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+);
+
 /* Tools -> 240p Test Suite. */
 void run240pSuite(
 	RenderContext  *ctx,

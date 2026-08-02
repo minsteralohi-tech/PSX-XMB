@@ -43,7 +43,7 @@ static uint32_t   xmbFrame       = 0;
 /* User-facing theme picker: names shown in the menu, and the style each one
  * maps to. Keep these two arrays in the same order, XMB_THEME_COUNT long. */
 const char *const xmbThemeNames[XMB_THEME_COUNT] = {
-	"Default",
+	"Default - Customize",
 	"Gouraud Waves + Sparkle",
 	"Aurora",
 	"Parallax Ribbons",
@@ -54,8 +54,7 @@ const char *const xmbThemeNames[XMB_THEME_COUNT] = {
 	"PS5 Spotlight",
 	"Nebula 3",
 	"PS4",
-	"PS4 v2",
-	"TEST logo"
+	"PS4 v2"
 };
 static const XMBBgStyle themeStyles[XMB_THEME_COUNT] = {
 	XMB_BG_GOURAUD_PSP,
@@ -69,8 +68,7 @@ static const XMBBgStyle themeStyles[XMB_THEME_COUNT] = {
 	XMB_BG_PS5_SPOTLIGHT,
 	XMB_BG_NEBULA3,
 	XMB_BG_PS4,
-	XMB_BG_PS4_V2,
-	XMB_BG_TEST_LOGO
+	XMB_BG_PS4_V2
 };
 uint8_t xmbThemeIndex = 0;
 
@@ -463,7 +461,7 @@ static uint32_t paletteRGB(const uint8_t c[3]) {
 /* --- icon shading style ------------------------------------------------- */
 
 const char *const xmbIconStyleNames[XMB_ICON_STYLE_COUNT] = {
-	"Default", "Light Gradient", "Dark Gradient"
+	"Default", "Light Gradient", "Crystal Glass", "Clear Crystal"
 };
 uint8_t xmbIconStyle = 0;
 
@@ -483,15 +481,117 @@ static uint32_t iconMod(const uint8_t c[3], int num, int den, int floorv) {
 
 void xmbGetIconGradient(uint32_t *top, uint32_t *bot) {
 	const XMBPalette *pal = currentPalette();
-	if (xmbIconStyle == 2) {
-		// Dark: a deeper tint of the wave colour, floored so it stays clearly
-		// above the dark background instead of merging into it.
-		*top = iconMod(pal->crestB, 1, 3, 0x30);
-		*bot = iconMod(pal->crestA, 1, 4, 0x28);
+	if (xmbIconStyle == 2 || xmbIconStyle == 3) {
+		// Crystal Glass: the same material as the memory card tiles and the
+		// CD player's track blocks - a bright specular top falling to a deep
+		// tint, which reads as a lit glassy surface rather than a flat wash.
+		//
+		// Follows the theme rather than only the wave palette, so it works on
+		// the backgrounds that have no palette of their own: Nebula 3 gives
+		// orange crystal, Cosmos violet, PS4 blue.
+		uint32_t accent;
+
+		xmbGetAccentColor(&accent, NULL);
+
+		uint32_t r = accent & 0xff;
+		uint32_t g = (accent >> 8) & 0xff;
+		uint32_t b = (accent >> 16) & 0xff;
+
+		// Highlight: lifted well past the base tint and toward white.
+		uint32_t hr = r * 5 / 2 + 0x38;
+		uint32_t hg = g * 5 / 2 + 0x38;
+		uint32_t hb = b * 5 / 2 + 0x38;
+
+		if (hr > 0xff) hr = 0xff;
+		if (hg > 0xff) hg = 0xff;
+		if (hb > 0xff) hb = 0xff;
+
+		// Shadow: deeper than the base, floored so the icon never merges
+		// into a dark background.
+		uint32_t sr = r * 3 / 4 + 0x1c;
+		uint32_t sg = g * 3 / 4 + 0x1c;
+		uint32_t sb = b * 3 / 4 + 0x1c;
+
+		*top = gp0_rgb((uint8_t) hr, (uint8_t) hg, (uint8_t) hb);
+		*bot = gp0_rgb((uint8_t) sr, (uint8_t) sg, (uint8_t) sb);
 	} else {
 		// Light (also the fallback): bright, light-tinted icons that pop.
 		*top = iconMod(pal->crestA, 1, 2, 0x44);
 		*bot = iconMod(pal->crestB, 1, 2, 0x38);
+	}
+}
+
+
+/* --- UI accent colour --------------------------------------------------- */
+
+/*
+ * Dominant hue of each theme, as plain RGB.
+ *
+ * Screens that draw their own "crystal" tiles - the memory card manager's
+ * block grid, the CD player's track list - ask for this so they follow the
+ * wallpaper instead of being permanently blue. The values are the colour each
+ * background actually reads as on screen, not a guess: Nebula 3's corona and
+ * roaming planets are orange, the Cosmos family is violet, the PS5 themes are
+ * warm amber, the PS4 ones deep blue.
+ *
+ * Index 0 ("Default") is the only theme the user can recolour, via the palette
+ * picker, so it is handled separately below and this row is never read.
+ *
+ * Same order as xmbThemeNames[].
+ */
+static const uint8_t themeAccents[XMB_THEME_COUNT][3] = {
+	{  90, 130, 235},   // Default - unused, see xmbGetAccentColor()
+	{  90, 130, 235},   // Gouraud Waves + Sparkle - XMB blue
+	{  60, 210, 180},   // Aurora - green-teal curtains
+	{  80, 150, 240},   // Parallax Ribbons - blue ribbons
+	{ 150,  90, 225},   // Space Cosmos - violet nebula
+	{ 150,  90, 225},   // Space Cosmos 3D++1
+	{ 165, 105, 235},   // Space Cosmos 3D++2
+	{ 245, 175,  90},   // PS5 Sparkle - warm amber
+	{ 245, 165,  70},   // PS5 Spotlight - amber spotlight
+	{ 245, 140,  45},   // Nebula 3 - orange corona
+	{  70, 130, 245},   // PS4 - deep blue silk
+	{  80, 140, 250}    // PS4 v2 - blue glyphs
+};
+
+/*
+ * Two colours for a translucent "crystal" tile: a dark base tint and a bright
+ * glow for the selected state.
+ *
+ * The base is deliberately dark. Callers draw it with blending enabled and
+ * then lighten it themselves for the sheen and bevel, so handing back the
+ * accent at full brightness comes out washed rather than glassy.
+ */
+void xmbGetAccentColor(uint32_t *base, uint32_t *glow) {
+	uint8_t r, g, b;
+
+	if (xmbThemeIndex == XMB_PALETTE_THEME_INDEX) {
+		// The one theme with a user-selectable palette: follow the wave
+		// crest, which is what gives that background its character.
+		const XMBPalette *pal = currentPalette();
+		r = pal->crestB[0];
+		g = pal->crestB[1];
+		b = pal->crestB[2];
+	} else {
+		uint8_t i = xmbThemeIndex;
+		if (i >= XMB_THEME_COUNT)
+			i = 0;
+		r = themeAccents[i][0];
+		g = themeAccents[i][1];
+		b = themeAccents[i][2];
+	}
+
+	if (base)
+		*base = gp0_rgb(r * 3 / 10, g * 3 / 10, b * 3 / 10);
+
+	if (glow) {
+		// Bright, and pushed toward white so the bloom reads as light
+		// rather than as more of the same colour.
+		int gr = r / 2 + 128, gg = g / 2 + 128, gb = b / 2 + 128;
+		if (gr > 255) gr = 255;
+		if (gg > 255) gg = 255;
+		if (gb > 255) gb = 255;
+		*glow = gp0_rgb((uint8_t) gr, (uint8_t) gg, (uint8_t) gb);
 	}
 }
 

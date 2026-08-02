@@ -904,6 +904,7 @@ static void drawIconTexture(
 	ptr[3] = gp0_xy(displaySize, displaySize);
 }
 
+
 /* ---- Manager UI ---- */
 
 #define MC_GRID_COLS 3
@@ -930,33 +931,29 @@ static void drawIconTexture(
 #define MC_GRID_Y     40
 #define MC_TITLE_Y    16
 
-/* Selection bloom, 0xBBGGRR: a pale XMB blue-white. */
-#define MC_GLOW 0xffd8a0
-
+/*
+ * The tile tints follow the current theme's dominant colour, so the grid
+ * matches the wallpaper instead of being permanently blue - Nebula 3 gives
+ * orange crystal, the Cosmos themes violet, and so on. Fetched once per frame
+ * in drawMemoryCardManager() rather than per cell.
+ */
+static uint32_t mcAccent = 0x702810;   /* 0xBBGGRR, replaced each frame */
+static uint32_t mcGlow   = 0xffd8a0;
 
 /*
- * XMB-style "crystal" cell.
+ * A readable panel: one flat tint, bevelled edge, no sheen.
  *
- * The PS1 GPU has no alpha channel, no rounded primitives and no blur, so the
- * glassy look is faked out of flat quads:
- *
- *   - the body is drawn with blend=true, which uses the semi-transparent
- *     blend mode, so the wallpaper shows through and the tile reads as glass
- *     rather than a painted block;
- *   - a lighter band across the top half is the specular sheen. Two bands of
- *     slightly different brightness approximate a vertical gradient, which
- *     the renderer cannot do directly (drawGradientRectH is horizontal only);
- *   - a bright 1px edge along the top and left plus a dark one along the
- *     bottom and right is a standard bevel, and is what gives the 3D lift;
- *   - the top and bottom rows are inset by one pixel, which reads as a
- *     rounded corner at this size and costs two extra quads.
- *
- * Selection is a glow rather than an outline: three progressively larger and
- * fainter blended rings behind the tile, so it blooms outward instead of
- * getting a hard orange border.
- *
- * Colours are 0xBBGGRR to match the GPU's own word order.
+ * drawGlassPanel() is right for a small tile the eye skims over, but wrong
+ * behind a block of text - its sheen puts two different tones behind the same
+ * line. Here the body is drawn twice so it settles to about 75% opacity
+ * (blending is a fixed 50% mix, so each pass halves what shows through), then
+ * the same top-left/bottom-right bevel ties it to the tiles around it.
  */
+static void drawGlassCard(
+	RenderContext *ctx, int x, int y, int w, int h, uint32_t tint
+);
+
+/* Local shade helper; the tiles themselves are drawn by drawGlassPanel(). */
 static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
 	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
@@ -969,41 +966,25 @@ static uint32_t mcScale(uint32_t colour, int numerator, int denominator) {
 	return (b << 16) | (g << 8) | r;
 }
 
-static void drawGlassCell(
-	RenderContext *ctx,
-	int            x,
-	int            y,
-	int            w,
-	int            h,
-	uint32_t       tint,
-	bool           selected
+static void drawGlassCard(
+	RenderContext *ctx, int x, int y, int w, int h, uint32_t tint
 ) {
-	if (selected) {
-		/* Outward bloom: larger and dimmer with each ring. Drawn blended so
-		 * the rings accumulate rather than replacing what is underneath. */
-		drawRect(ctx, x - 4, y - 4, w + 8, h + 8, mcScale(MC_GLOW, 1, 4), true);
-		drawRect(ctx, x - 3, y - 3, w + 6, h + 6, mcScale(MC_GLOW, 1, 2), true);
-		drawRect(ctx, x - 2, y - 2, w + 4, h + 4, MC_GLOW, true);
-	}
+	uint32_t body = mcScale(tint, 3, 4);   /* a touch darker than the tiles */
 
-	/* Body, with the top and bottom rows inset to round the corners. */
-	drawRect(ctx, x,     y + 1, w,     h - 2, tint, true);
-	drawRect(ctx, x + 1, y,     w - 2, 1,     tint, true);
-	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, tint, true);
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x + 1, y,         w - 2, 1,     body, true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1,     body, true);
 
-	/* Specular sheen across the top, two steps for a soft falloff. */
-	drawRect(ctx, x + 1, y + 1,     w - 2, h / 3,     mcScale(tint, 9, 4), true);
-	drawRect(ctx, x + 1, y + 1 + h / 3, w - 2, h / 6, mcScale(tint, 6, 4), true);
-
-	/* Bevel: light from the top left, shadow to the bottom right. */
 	uint32_t lit   = mcScale(tint, 5, 2);
 	uint32_t shade = mcScale(tint, 1, 3);
 
-	drawRect(ctx, x + 1, y,         w - 2, 1, lit,   true);
-	drawRect(ctx, x,     y + 1,     1, h - 2, lit,   true);
-	drawRect(ctx, x + 1, y + h - 1, w - 2, 1, shade, true);
-	drawRect(ctx, x + w - 1, y + 1, 1, h - 2, shade, true);
+	drawRect(ctx, x + 1,     y,         w - 2, 1,     lit,   true);
+	drawRect(ctx, x,         y + 1,     1,     h - 2, lit,   true);
+	drawRect(ctx, x + 1,     y + h - 1, w - 2, 1,     shade, true);
+	drawRect(ctx, x + w - 1, y + 1,     1,     h - 2, shade, true);
 }
+
 
 typedef enum {
 	MENU_OPTION_COPY,
@@ -1208,6 +1189,7 @@ void runMemoryCardManager(
 						newSel++;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1218,6 +1200,7 @@ void runMemoryCardManager(
 						newSel--;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1228,6 +1211,7 @@ void runMemoryCardManager(
 						newSel += MC_GRID_COLS;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1238,6 +1222,7 @@ void runMemoryCardManager(
 						newSel -= MC_GRID_COLS;
 						if (isSelectableCell(entries[activeSlot], newSel)) {
 							selected = newSel;
+							playScrollSound();
 							break;
 						}
 					}
@@ -1251,6 +1236,7 @@ void runMemoryCardManager(
 						newSlot = 1;
 
 					if (newSlot != activeSlot) {
+						playScrollSound();
 						activeSlot = newSlot;
 						if (!isSelectableCell(entries[activeSlot], selected)) {
 							int fallback = selected;
@@ -1266,25 +1252,40 @@ void runMemoryCardManager(
 				}
 
 				if (pressed & PAD_BTN_CROSS) {
-					stage        = STAGE_MENU;
-					menuSelected = MENU_OPTION_COPY;
+					// Only offer the menu for a block that has something in
+					// it. Every option except Format acts on a save, and
+					// Format is reachable from any used block on the card, so
+					// opening this on a free slot only ever led to a dead end.
+					const DirectoryEntry *cell =
+						&entries[activeSlot][selected];
+
+					if (cell->read && (cell->used || cell->deleted)) {
+						playConfirmSound();
+						stage        = STAGE_MENU;
+						menuSelected = MENU_OPTION_COPY;
+					}
 				}
 			} else if (stage == STAGE_MENU) {
 				bool showClean = entries[activeSlot][selected].deleted;
 
 				if (pressed & PAD_BTN_DOWN) {
+					playScrollSound();
 					menuSelected = (menuSelected + 1) % MENU_NUM_OPTIONS;
 					if (!showClean && (menuSelected == MENU_OPTION_CLEAR))
 						menuSelected = (menuSelected + 1) % MENU_NUM_OPTIONS;
 				}
 				if (pressed & PAD_BTN_UP) {
+					playScrollSound();
 					menuSelected = (menuSelected + MENU_NUM_OPTIONS - 1) % MENU_NUM_OPTIONS;
 					if (!showClean && (menuSelected == MENU_OPTION_CLEAR))
 						menuSelected = (menuSelected + MENU_NUM_OPTIONS - 1) % MENU_NUM_OPTIONS;
 				}
-				if (pressed & PAD_BTN_TRIANGLE)
+				if (pressed & PAD_BTN_CIRCLE) {
+					playCancelSound();
 					stage = STAGE_BROWSING;
+				}
 				if (pressed & PAD_BTN_CROSS) {
+					playConfirmSound();
 					if (menuSelected == MENU_OPTION_CANCEL) {
 						stage = STAGE_BROWSING;
 					} else if (menuSelected == MENU_OPTION_DELETE || menuSelected == MENU_OPTION_FORMAT || menuSelected == MENU_OPTION_CLEAR) {
@@ -1342,9 +1343,12 @@ void runMemoryCardManager(
 					}
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				if (pressed & PAD_BTN_TRIANGLE)
+				if (pressed & PAD_BTN_CIRCLE) {
+					playCancelSound();
 					stage = STAGE_BROWSING;
+				}
 				if (pressed & PAD_BTN_CROSS) {
+					playConfirmSound();
 					stage = STAGE_BROWSING;
 
 					if (menuSelected == MENU_OPTION_DELETE) {
@@ -1442,6 +1446,7 @@ void runMemoryCardManager(
 		}
 
 		if ((stage == STAGE_BROWSING) && (released & PAD_BTN_START) && startRefreshCandidate) {
+			playConfirmSound();
 			startRefreshCandidate = false;
 			present[0] = detectMemoryCard(0, resp0);
 			present[1] = detectMemoryCard(1, resp1);
@@ -1468,6 +1473,10 @@ void runMemoryCardManager(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
+		// Follow the wallpaper: picked up every frame so switching theme in
+		// Settings and coming back here recolours the grid immediately.
+		xmbGetAccentColor(&mcAccent, &mcGlow);
+
 		printString(ctx, 16, MC_TITLE_Y, 0x808080, "MEMORY CARD MANAGER");
 
 		if (!haveAnyCard) {
@@ -1481,6 +1490,8 @@ void runMemoryCardManager(
 
 				if (!present[slot]) {
 					printString(ctx, baseX, MC_GRID_Y, 0x808080, "(empty)");
+					printString(ctx, baseX, MC_GRID_Y + 14, 0x505050, "START");
+					printString(ctx, baseX, MC_GRID_Y + 26, 0x505050, "to scan");
 					continue;
 				}
 
@@ -1492,26 +1503,31 @@ void runMemoryCardManager(
 
 					const DirectoryEntry *entry = &entries[slot][i];
 
-					// Tints are deliberately dark: drawGlassCell() lightens
+					// Tints are deliberately dark: drawGlassPanel() lightens
 					// them for the sheen and the bevel, and blending lets the
 					// wallpaper through, so a mid-brightness tint here comes
 					// out washed rather than glassy. 0xBBGGRR.
+					// Occupied and free blocks are the theme accent at two
+					// brightnesses, so the grid reads as one material. Deleted
+					// keeps a fixed amber and unreadable a neutral grey: those
+					// two carry meaning, and tinting them would make them
+					// indistinguishable from "used" under a warm theme.
 					uint32_t color;
 					if (!entry->read)
-						color = 0x1a1a1a;   // unreadable: neutral grey
+						color = 0x1a1a1a;                  // unreadable
 					else if (entry->used)
-						color = 0x702810;   // occupied: XMB blue
+						color = mcAccent;                  // occupied
 					else if (entry->deleted)
-						color = 0x184048;   // deleted: amber
+						color = 0x184048;                  // deleted: amber
 					else
-						color = 0x281808;   // free: dim steel
+						color = mcScale(mcAccent, 2, 5);   // free: dimmer
 
 					bool isSelected = (slot == activeSlot) && (i == selected);
 					bool willShowIcon = entry->used && gridIconValid[slot][i];
 
-					drawGlassCell(
+					drawGlassPanel(
 						ctx, x, y, MC_CELL_W - 3, MC_CELL_H - 3,
-						color, isSelected
+						color, isSelected ? mcGlow : 0
 					);
 
 					if (willShowIcon) {
@@ -1555,21 +1571,43 @@ void runMemoryCardManager(
 				}
 			}
 
-			if (noticeTimer > 0)
-				printString(ctx, 16, panelY + 30, 0x1256e3, notice);
+			if (noticeTimer > 0) {
+				// Right-aligned on the same row as "Game ID", rather than
+				// stacked below the status block, where it overlapped the
+				// control hints at the bottom of the screen.
+				int noticeW = getStringWidth(notice);
+				printString(
+					ctx, 304 - noticeW, panelY + 24, 0x1256e3, notice
+				);
+			}
 
 			if (stage == STAGE_MENU) {
 				bool showClean = sel && sel->deleted;
 
 				const char *titleLine =
-					"Options   " CH_PS1_CROSS_BUTTON ": OK   "
-					CH_PS1_TRIANGLE_BUTTON ": Back";
+					"Options  " CH_PS1_CROSS_BUTTON ": OK  "
+					CH_PS1_CIRCLE_BUTTON ": Back";
 
-				int boxWidth = getStringWidth(titleLine) + 16;
+				// Wide enough for the title and a small margin past "Back",
+				// rather than the old fixed-ish width that left a large empty
+				// gap down the right-hand side.
+				int boxWidth = getStringWidth(titleLine) + 14;
 				int boxX     = (320 - boxWidth) / 2;
+				int boxH     = 106;
 
-				drawRect(ctx, boxX, 50, boxWidth, 106, 0x282828, false);
-				drawRect(ctx, boxX, 50, boxWidth, 16, 0x505050, false);
+				// A panel has to be readable first and pretty second, so this
+				// deliberately does NOT use drawGlassPanel(): its sheen band
+				// and brighter title bar split the background into two tones
+				// behind the text, and white text over the lighter one was
+				// hard to read.
+				//
+				// Instead: one flat tint at roughly 75% opacity. Blending is
+				// a fixed 50% mix on this hardware, so drawing the same rect
+				// twice halves the remaining transparency each time - two
+				// passes is enough to settle the text background down while
+				// still letting a hint of the wallpaper through.
+				drawGlassCard(ctx, boxX, 50, boxWidth, boxH, mcAccent);
+
 				printString(ctx, boxX + 8, 54, 0xffffff, titleLine);
 
 				const char *labels[MENU_NUM_OPTIONS];
@@ -1585,14 +1623,22 @@ void runMemoryCardManager(
 						continue;
 					printString(
 						ctx, boxX + 8, 74 + drawRow * 16,
+						// The shared UI accent (COLOR_HIGHLIGHT1 in ui.c),
+						// same as the RAM tester's highlight bar and the CD
+						// player's state text. Deliberately NOT theme-tinted:
+						// it is the one colour that means "this is selected"
+						// everywhere in the dashboard.
 						(i == menuSelected) ? 0x1256e3 : 0xffffff,
 						labels[i]
 					);
 					drawRow++;
 				}
 			} else if (stage == STAGE_CONFIRM) {
-				drawRect(ctx, 70, 85, 200, 60, 0x282828, false);
-				drawRect(ctx, 70, 85, 200, 16, 0xe04040, false);
+				// Same flat card as the options popup, but the title band
+				// stays red: this dialog destroys data and should not blend
+				// into the theme.
+				drawGlassCard(ctx, 70, 85, 200, 60, mcAccent);
+				drawRect(ctx, 71, 86, 198, 15, 0x2020c0, false);
 				if (menuSelected == MENU_OPTION_FORMAT) {
 					printString(ctx, 78, 89, 0xffffff, "Format this card?");
 					printString(ctx, 78, 107, 0xffffff, "Erases ALL saves!");
@@ -1604,9 +1650,19 @@ void runMemoryCardManager(
 				} else {
 					printString(ctx, 78, 89, 0xffffff, "Delete this save?");
 				}
-				printString(ctx, 78, 125, 0xffffff, "X: confirm   Triangle: cancel");
+				printString(ctx, 78, 125, 0xffffff,
+					CH_PS1_CROSS_BUTTON ": confirm   "
+					CH_PS1_CIRCLE_BUTTON ": cancel");
 			} else {
-				printString(ctx, 16, 202, 0x505050, "D-PAD select   X: options");
+				// With no card in either slot there is nothing to select and
+				// nothing to open, so the only useful action is the refresh -
+				// say so here rather than listing controls that do nothing.
+				if (!present[0] && !present[1])
+					printString(ctx, 16, 202, 0x505050,
+						CH_PS1_START_BUTTON ": Refresh");
+				else
+					printString(ctx, 16, 202, 0x505050,
+						"D-PAD select   " CH_PS1_CROSS_BUTTON ": options");
 				if (present[0] && present[1])
 					printString(ctx, 16, 212, 0x505050, "L1/R1: switch card   START: refresh");
 				else

@@ -22,6 +22,7 @@
 #include "main/defs.h"
 #include "main/font.h"
 #include "main/launch_ui.h"
+#include "main/xmb_menu.h"
 #include "main/sound.h"
 #include "main/xmb_bg.h"
 
@@ -29,6 +30,7 @@
 extern const uint8_t sioLoaderExe[];
 extern const uint8_t uniromExe[];
 extern const uint8_t suite240pExe[];
+extern const uint8_t sony41BiosExe[];
 
 /*
  * Per-app launch settings.
@@ -67,6 +69,15 @@ typedef struct {
 static const LaunchConfig SIO_LOADER_CONFIG = { 0, 0 };
 static const LaunchConfig UNIROM_CONFIG     = { 0, 0 };
 static const LaunchConfig SUITE240P_CONFIG  = { 1, 0 };
+
+/*
+ * Sony 4.1A BIOS shell. Tested on hardware and works with the RAM erase both
+ * on and off, so it takes the erase: it is a BIOS shell and will go on to boot
+ * a game, which is exactly the case where a cold-boot-like RAM state is worth
+ * having. It loads at 0x8002F000, over this dashboard, so stage 1 is mandatory
+ * and Exec() is unavailable regardless.
+ */
+static const LaunchConfig SONY41_CONFIG     = { 1, 0 };
 
 static void waitForRelease(void) {
 	while (pollController(0) | pollController(1))
@@ -117,12 +128,84 @@ static void showPlanError(
  * and print the full address plan. That was scaffolding for working out which
  * combination each app needed; now that each one is known, it is just noise.
  */
+/*
+ * A readable panel: one flat tint, bevelled edge, no sheen.
+ *
+ * The same treatment the memory card manager's Options popup uses. Not
+ * drawGlassPanel(): its specular band puts two different tones behind the
+ * same line of text, which is fine on a small tile and bad behind a
+ * paragraph. Drawing the body twice settles it to roughly 75% opacity -
+ * blending is a fixed 50% mix on this hardware, so each pass halves what
+ * still shows through.
+ */
+static uint32_t shade(uint32_t colour, int numerator, int denominator) {
+	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
+	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
+	uint32_t b = (((colour >> 16) & 0xff) * numerator) / denominator;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
+
+static void drawDialogCard(
+	RenderContext *ctx, int x, int y, int w, int h, uint32_t tint
+) {
+	uint32_t body = shade(tint, 3, 4);
+
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x,     y + 1,     w,     h - 2, body, true);
+	drawRect(ctx, x + 1, y,         w - 2, 1,     body, true);
+	drawRect(ctx, x + 1, y + h - 1, w - 2, 1,     body, true);
+
+	uint32_t lit   = shade(tint, 5, 2);
+	uint32_t shadeC = shade(tint, 1, 3);
+
+	drawRect(ctx, x + 1,     y,         w - 2, 1,     lit,    true);
+	drawRect(ctx, x,         y + 1,     1,     h - 2, lit,    true);
+	drawRect(ctx, x + 1,     y + h - 1, w - 2, 1,     shadeC, true);
+	drawRect(ctx, x + w - 1, y + 1,     1,     h - 2, shadeC, true);
+}
+
+/*
+ * Exit confirmation.
+ *
+ * This used to be a full screen of text. A dialog over the live dashboard
+ * reads better and, more usefully, makes it obvious that nothing has happened
+ * yet - the menu is still there behind it.
+ */
 static int confirmHandoff(
 	RenderContext *ctx,
-	const char    *title,
-	const char    *blurb1,
-	const char    *blurb2
+	UIState       *state,
+	const char    *title
 ) {
+	const char *line1 = "You are exiting the PSX Dashboard.";
+	const char *line2 = "Reset the console to return to the menu";
+	const char *keys  = CH_PS1_CROSS_BUTTON ": OK   "
+	                    CH_PS1_CIRCLE_BUTTON ": Back";
+
+	// Hug the widest line rather than guessing a width. getStringWidth()
+	// handles the button glyphs correctly now that it stopped treating them
+	// as negative char values.
+	int textW = getStringWidth(line1);
+	int w2    = getStringWidth(line2);
+	int w3    = getStringWidth(keys);
+
+	if (w2 > textW) textW = w2;
+	if (w3 > textW) textW = w3;
+
+	int boxW = textW + 20;
+	if (boxW > 300)
+		boxW = 300;
+
+	int boxX = (320 - boxW) / 2;
+	int boxH = 92;
+	int boxY = (240 - boxH) / 2;
+
+	uint32_t accent, glow;
+
 	waitForRelease();
 
 	for (;;) {
@@ -134,24 +217,29 @@ static int confirmHandoff(
 			return 0;
 		}
 
-		if (buttons & PAD_BTN_CROSS)
+		if (buttons & PAD_BTN_CROSS) {
+			playConfirmSound();
 			break;
+		}
 
 		beginFrame(ctx);
-		drawXMBBackground(ctx);
 
-		printString(ctx, 16, 30, 0xffffff, title);
-		printString(ctx, 16, 66, 0xffffff,
-			"This will leave the PSX-iTests dashboard.");
-		printString(ctx, 16, 82, 0xffffff, blurb1);
-		printString(ctx, 16, 98, 0xffffff, blurb2);
+		// The menu itself, so the dialog reads as an overlay on top of a
+		// live screen rather than as a separate page - Circle visibly
+		// returns to exactly where the user was.
+		renderXMB(ctx, state);
 
-		printString(ctx, 16, 130, 0x808080,
-			"Reset or power-cycle to come back.");
+		// Follow the wallpaper, same as the memory card tiles.
+		xmbGetAccentColor(&accent, &glow);
 
-		printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
-			CH_PS1_CROSS_BUTTON " Enter    "
-			CH_PS1_CIRCLE_BUTTON " Back");
+		drawDialogCard(ctx, boxX, boxY, boxW, boxH, accent);
+
+		printString(ctx, boxX + 10, boxY + 10, 0xffffff, title);
+		printString(ctx, boxX + 10, boxY + 34, 0xffffff, line1);
+		printString(ctx, boxX + 10, boxY + 50, 0xffffff, line2);
+		// Plain white, not the theme accent: OK/Back are the same everywhere
+		// in the dashboard and should not shift colour with the wallpaper.
+		printString(ctx, boxX + 10, boxY + 72, 0xffffff, keys);
 
 		endFrame(ctx);
 	}
@@ -165,9 +253,8 @@ static int confirmHandoff(
  */
 static void runLaunchScreen(
 	RenderContext      *ctx,
+	UIState            *state,
 	const char         *title,
-	const char         *blurb1,
-	const char         *blurb2,
 	const uint8_t      *exe,
 	const LaunchConfig *config
 ) {
@@ -185,7 +272,7 @@ static void runLaunchScreen(
 	if (config->biosExec)
 		(void) planUseBiosExec(&plan, 1);
 
-	if (!confirmHandoff(ctx, title, blurb1, blurb2))
+	if (!confirmHandoff(ctx, state, title))
 		return;
 
 	/* Never returns. */
@@ -197,14 +284,12 @@ void runSIOLoader(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
 	runLaunchScreen(
 		ctx,
+		state,
 		"SIO LOADER",
-		"The standalone serial loader will start and",
-		"wait for a PS-EXE on SIO1 at 115200 8N2.",
 		sioLoaderExe,
 		&SIO_LOADER_CONFIG
 	);
@@ -215,16 +300,30 @@ void run240pSuite(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
 	runLaunchScreen(
 		ctx,
+		state,
 		"240P TEST SUITE",
-		"Artemio's 240p Test Suite will be copied",
-		"over this dashboard and started.",
 		suite240pExe,
 		&SUITE240P_CONFIG
+	);
+}
+
+void runSony41Bios(
+	RenderContext  *ctx,
+	UIState        *state,
+	const MenuItem *item
+) {
+	(void) item;
+
+	runLaunchScreen(
+		ctx,
+		state,
+		"SONY 4.1 BIOS",
+		sony41BiosExe,
+		&SONY41_CONFIG
 	);
 }
 
@@ -233,19 +332,12 @@ void runUniROMLauncher(
 	UIState        *state,
 	const MenuItem *item
 ) {
-	(void) state;
 	(void) item;
 
-	/*
-	 * If a real UniROM cartridge is installed, use the "UniROM (cart
-	 * installed)" entry instead: this one copies a second, independent
-	 * UniROM image into RAM while the cart's firmware is still resident.
-	 */
 	runLaunchScreen(
 		ctx,
+		state,
 		"UNIROM 8.0",
-		"UniROM will be copied to RAM and started.",
-		"For a real UniROM cart, use the cart entry.",
 		uniromExe,
 		&UNIROM_CONFIG
 	);

@@ -61,6 +61,25 @@ void drawRect(
 	uint32_t      color,
 	bool          blend
 );
+/*
+ * Translucent "crystal" tile: blended body, specular sheen, bevelled edge and
+ * chamfered corners, optionally surrounded by a glow. Used for the memory card
+ * block grid and the CD player's track list.
+ *
+ * `tint` must be dark - blending and the sheen both lighten it. Pass glow = 0
+ * for an unselected tile. xmbGetAccentColor() supplies both colours already
+ * matched to the current theme.
+ */
+void drawGlassPanel(
+	RenderContext *ctx,
+	int           x,
+	int           y,
+	int           w,
+	int           h,
+	uint32_t      tint,
+	uint32_t      glow
+);
+
 void drawGradientRectH(
 	RenderContext *ctx,
 	int           x,

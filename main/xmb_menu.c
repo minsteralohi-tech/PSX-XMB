@@ -58,8 +58,8 @@ typedef struct {
 /* Forward-declared local actions. */
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
-static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
+static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item);
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
@@ -99,7 +99,7 @@ static const XMBEntry hwItems[] = {
 	{ "Pad Tester",         9, runPadTest,         true },
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },
 	{ "UniROM 8.0",         8, xmbLaunchUniROM,    true },
-	{ "UniROM (cart installed)", 8, xmbReturnToUniROMCart, true },
+	{ "Sony 4.1 BIOS",      8, xmbLaunchSony41Bios, true },
 	{ "240p Test Suite",   6, xmbLaunch240pSuite, true },
 };
 
@@ -196,6 +196,12 @@ static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuIte
 	run240pSuite(ctx, state, item);
 }
 
+/* Sony 4.1A BIOS shell. Unproven, so this one keeps the hand-off options on
+ * screen - see runSony41Bios() in launch_ui.c. */
+static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item) {
+	runSony41Bios(ctx, state, item);
+}
+
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item) {
 	// The confirmation screen, the plan validation and the handoff all live
 	// in launch_ui.c now, shared with Settings -> SIO Loader, so the two
@@ -203,22 +209,13 @@ static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *
 	runUniROMLauncher(ctx, state, item);
 }
 
-/* For consoles that boot into this app THROUGH a real, physically-installed
- * UniROM cartridge: use this instead of "UniROM 8.0" above. That option
- * copies a second, independent UniROM image into RAM, which fights the
- * cart's own resident firmware (that's what was producing the RAM error -
- * see unirom_launch.c). This just hands control back the way a real
- * soft-reset would; the cart intercepts that at the hardware level and its
- * own menu comes back. */
-static void xmbReturnToUniROMCart(RenderContext *ctx, UIState *state, const MenuItem *item) {
-	(void) ctx; (void) state; (void) item;
-	returnToUniROMCart();
-}
 
 /* --- drawing helpers ---------------------------------------------------- */
 
 #define TEXT_WHITE  0x808080
 #define TEXT_DIM    0x404040
+// Listed but not present in this build - see bgmTrackAvailable().
+#define TEXT_DISABLED 0x202020
 
 /* Draw a small filled circle (~9 px) as a stack of flat mono quads - used as
  * the "currently active" marker in the theme list and the value columns, in
@@ -360,7 +357,49 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		//                     so the icons tint to match whatever background is
 		//                     active without merging into it.
 		// The original Gouraud Waves theme keeps its fixed icy-blue gradient.
-		if (xmbIconStyle != 0) {
+		if (xmbIconStyle == 3) {
+			/*
+			 * Clear Crystal: the icon as tinted glass.
+			 *
+			 * Two things had to be right, and earlier attempts got both
+			 * wrong.
+			 *
+			 * ONE blended pass. Blending is a fixed 50% mix, so a second
+			 * pass halves the remaining transparency and the icon goes back
+			 * to looking solid - which is exactly what was happening.
+			 *
+			 * A DARK tint. The artwork in icons_cat.png is pure white, and
+			 * the GPU modulates the texel by the vertex colour, so a bright
+			 * tint produces a bright opaque shape no matter how it is
+			 * blended. The memory card tiles read as glass because their
+			 * body is the accent at its DARK base value - the same value
+			 * used here, with only a modest lift toward the top for the
+			 * specular edge.
+			 */
+			uint32_t accent;
+
+			xmbGetAccentColor(&accent, NULL);
+
+			uint32_t r = accent & 0xff;
+			uint32_t g = (accent >> 8) & 0xff;
+			uint32_t b = (accent >> 16) & 0xff;
+
+			/* Selected sits forward: same hue, a little more presence. */
+			int lift = sel ? 2 : 1;
+
+			uint32_t tr = r * (2 + lift) / 2, tg = g * (2 + lift) / 2,
+			         tb = b * (2 + lift) / 2;
+
+			if (tr > 0xff) tr = 0xff;
+			if (tg > 0xff) tg = 0xff;
+			if (tb > 0xff) tb = 0xff;
+
+			uint32_t top = gp0_rgb((uint8_t) tr, (uint8_t) tg, (uint8_t) tb);
+			uint32_t bot = gp0_rgb((uint8_t) r,  (uint8_t) g,  (uint8_t) b);
+
+			drawCategoryIconGradient(ctx, categories[i].icon,
+				x - size / 2, ROW_Y - size / 2, size, true, top, bot);
+		} else if (xmbIconStyle != 0) {
 			uint32_t top, bot;
 			xmbGetIconGradient(&top, &bot);
 			drawCategoryIconGradient(ctx, categories[i].icon,
@@ -478,8 +517,14 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 				int ady = dyFx < 0 ? -dyFx : dyFx;
 				bool sel = musicSubMenuOpen && ady < 128;
 
-				printString(ctx, x + 14, y - 4,
-					sel ? TEXT_WHITE : TEXT_DIM,
+				// A BGM track listed but not embedded in this build is drawn
+				// darker than TEXT_DIM and never highlights, so it reads as
+				// unavailable rather than broken. See bgmTrackAvailable().
+				bool avail = !isBGM || bgmTrackAvailable(j);
+				uint32_t col = !avail ? TEXT_DISABLED
+				             : (sel ? TEXT_WHITE : TEXT_DIM);
+
+				printString(ctx, x + 14, y - 4, col,
 					isBGM ? getBGMName(j) : getSFXSetName(j));
 				if (j == applied)
 					drawDisc(getCurrentChain(ctx), x + 6, y - 1, TEXT_WHITE);
@@ -519,11 +564,17 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		}
 	}
 
-	// footer hint
-	printString(ctx, 12, 214, TEXT_DIM,
-		CH_PS1_DPAD_X " Category   "
-		CH_PS1_DPAD_Y " Item   "
-		CH_PS1_CROSS_BUTTON " Select");
+	// footer hint, right-aligned rather than pinned to the left edge.
+	{
+		const char *hint =
+			CH_PS1_DPAD_X " Category   "
+			CH_PS1_DPAD_Y " Item   "
+			CH_PS1_CROSS_BUTTON " Select";
+
+		printString(
+			ctx, 308 - getStringWidth(hint), 214, TEXT_DIM, hint
+		);
+	}
 }
 
 void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
@@ -634,11 +685,29 @@ void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 			bool isBGM = (musicOptIndex == 0);
 			int cnt = isBGM ? getBGMCount() : getSFXSetCount();
 
+			// Step over any track this build does not contain, so the
+			// cursor never rests on a greyed-out entry.
 			if (nav & PAD_BTN_UP) {
-				if (musicSubIndex > 0) { musicSubIndex--; playScrollSound(); }
+				int n = musicSubIndex;
+				while (n > 0) {
+					n--;
+					if (!isBGM || bgmTrackAvailable(n)) {
+						musicSubIndex = n;
+						playScrollSound();
+						break;
+					}
+				}
 			}
 			if (nav & PAD_BTN_DOWN) {
-				if (musicSubIndex < cnt - 1) { musicSubIndex++; playScrollSound(); }
+				int n = musicSubIndex;
+				while (n < cnt - 1) {
+					n++;
+					if (!isBGM || bgmTrackAvailable(n)) {
+						musicSubIndex = n;
+						playScrollSound();
+						break;
+					}
+				}
 			}
 			if ((state->buttonsPressed & PAD_BTN_CROSS) || (nav & PAD_BTN_RIGHT)) {
 				if (isBGM)

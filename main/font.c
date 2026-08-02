@@ -197,7 +197,19 @@ int getStringWidth(const char *str) {
 	int currentX = 0, maxWidth = 0;
 
 	for (; *str; str++) {
-		char ch = *str;
+		// uint8_t, not char. This project builds with -fsigned-char, so the
+		// button-glyph bytes (0x80-0x86, see defs.h) came out NEGATIVE here:
+		// the 0x89..0xff clamp below never matched them, and
+		// fontSprites[ch - FONT_FIRST_TABLE_CHAR] then indexed before the
+		// start of the array and added whatever garbage it found to the
+		// width.
+		//
+		// printString() already did this correctly, so measurement and
+		// rendering silently disagreed for any string containing a glyph -
+		// the memory card Options popup measured 253px for a title that
+		// renders 144px, which is why it was drawn about twice as wide as
+		// its contents.
+		uint8_t ch = (uint8_t) *str;
 
 		switch (ch) {
 			case '\t':
@@ -216,8 +228,8 @@ int getStringWidth(const char *str) {
 				currentX += FONT_SPACE_WIDTH;
 				continue;
 
-			case '\x89' ... '\xff':
-				ch = '\x7f';
+			case 0x89 ... 0xff:
+				ch = 0x7f;
 				break;
 		}
 

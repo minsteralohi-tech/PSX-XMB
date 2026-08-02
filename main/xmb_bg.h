@@ -50,7 +50,12 @@ typedef enum {
  * its label list at xmbThemeNames; drawXMBBackground() follows xmbThemeIndex
  * automatically, so switching the theme updates the background live.
  */
-#define XMB_THEME_COUNT 13
+/*
+ * "TEST logo" was removed from the picker; XMB_BG_TEST_LOGO and its drawer
+ * remain available via xmbBgSetStyle() for debugging, they are just not
+ * offered as a user theme any more.
+ */
+#define XMB_THEME_COUNT 12
 
 #ifdef __cplusplus
 extern "C" {
@@ -81,13 +86,24 @@ extern uint8_t           xmbPaletteIndex; // 0 .. XMB_PALETTE_COUNT - 1
  * colour palette, so they read against whatever background is active without
  * merging into it.
  */
-#define XMB_ICON_STYLE_COUNT 3
+#define XMB_ICON_STYLE_COUNT 4
 extern const char *const xmbIconStyleNames[XMB_ICON_STYLE_COUNT];
 extern uint8_t           xmbIconStyle;   // 0 Default, 1 Light, 2 Dark
 
 // Fill *top/*bot with the GP0 modulation colours for the current icon style
 // and palette. Only meaningful when xmbIconStyle != 0 (Default = plain white).
 void xmbGetIconGradient(uint32_t *top, uint32_t *bot);
+
+/*
+ * Dominant colour of the current theme, for screens that draw their own
+ * translucent "crystal" tiles (the memory card grid, the CD player track
+ * list) and want to follow the wallpaper rather than stay permanently blue.
+ *
+ * *base is a dark tint meant to be drawn blended and then lightened by the
+ * caller for its sheen and bevel; *glow is a bright, near-white version for a
+ * selection bloom. Either pointer may be NULL.
+ */
+void xmbGetAccentColor(uint32_t *base, uint32_t *glow);
 
 /*
  * Wave style for the customizable PSP wave theme: 10 variants ranging from a

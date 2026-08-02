@@ -22,6 +22,8 @@
 #include "main/font.h"
 #include "main/hud.h"
 #include "main/icon.h"
+#include "main/fastboot.h"
+#include "main/gameid.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
 #include "main/sound.h"
@@ -86,8 +88,22 @@ int main(int argc, const char **argv) {
 	initSystemHUD();
 	enterMainMenu(&ctx, &state, 0);
 
+#if GAMEID_ENABLED
+	// Buffer for SYSTEM.CNF. Static rather than a local: 2 KB is far more
+	// than this stack wants to carry.
+	static uint8_t gameIdScratch[GAMEID_SCRATCH_SIZE];
+#endif
+
+#if GAMEID_ENABLED
+	gameIdInit();
+#endif
+
 	for (;;) {
 		uint16_t buttons = pollController(0) | pollController(1);
+
+#if GAMEID_ENABLED
+		gameIdPoll(gameIdScratch, sizeof(gameIdScratch));
+#endif
 
 		beginFrame(&ctx);
 
@@ -112,6 +128,22 @@ int main(int argc, const char **argv) {
 			if (state.buttonsPressed & PAD_BTN_SELECT)
 				toggleSystemHUD();
 
+			// R1 rescans the disc. Manual rather than automatic: reading it
+			// costs a visible pause, and detecting the lid automatically
+			// would mean driving the CD-ROM behind the BIOS's back, which
+			// crashes the dashboard - see the note in gameid.c.
+#if GAMEID_ENABLED
+			if (state.buttonsPressed & PAD_BTN_R1)
+				gameIdRequestScan();
+
+			// START on the disc notification boots the game, by handing over
+			// to cdloader.exe exactly as Fast Boot does - it already knows
+			// how to unlock the drive and start a disc, so there is no second
+			// implementation of that here. Never returns.
+			if ((state.buttonsPressed & PAD_BTN_START) && gameIdCanLaunch())
+				launchLoader();
+#endif
+
 			if (!isXMBActive()) {
 				char toggleLine[64];
 				snprintf(
@@ -131,6 +163,10 @@ int main(int argc, const char **argv) {
 				printString(&ctx, 16, 206, 0x505050, toggleLine2);
 			}
 		}
+
+#if GAMEID_ENABLED
+		drawGameIdNotice(&ctx);
+#endif
 
 		endFrame(&ctx);
 	}

@@ -43,6 +43,25 @@
 #include "main/font.h"
 #include "main/mainmenu.h"
 #include "main/xmb_bg.h"
+
+/*
+ * Theme accent for the track tiles, refreshed once per frame. 0xBBGGRR.
+ */
+static uint32_t cdAccent = 0x702810;
+static uint32_t cdGlow   = 0xffd8a0;
+
+/* Scale a 0xBBGGRR colour, clamped per channel. */
+static uint32_t glassShade(uint32_t colour, int numerator, int denominator) {
+	uint32_t r = ((colour        & 0xff) * numerator) / denominator;
+	uint32_t g = (((colour >> 8)  & 0xff) * numerator) / denominator;
+	uint32_t b = (((colour >> 16) & 0xff) * numerator) / denominator;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
 #include "main/sound.h"
 #include "ps1/registers.h"
 
@@ -225,6 +244,27 @@ static void applyReverbPreset(ReverbPreset preset) {
 	}
 }
 
+/*
+ * Layout. Title was at y=10, which a CRT's overscan clips on most sets - the
+ * same problem the memory card manager had. Moved to y=16 to match its safe
+ * margin, and everything below shifted/compressed to fit: the tail used to
+ * run to y=218, six pixels past where it is safe to put the last line.
+ */
+#define CD_TITLE_Y      16
+#define CD_GRID_Y       32
+#define CD_MORE_Y       114
+#define CD_TRACKTIME_Y  128
+#define CD_STATE_Y      140
+#define CD_VOLUME_Y     154
+#define CD_CONTROLS1_Y  172
+#define CD_CONTROLS2_Y  184
+#define CD_EXIT_HINT_Y  204
+
+/* Video frames per second. PAL runs at 50, so the clock gains about a second
+ * every five minutes there - invisible on a single track, and not worth a
+ * region check on the display path. */
+#define CD_FRAMES_PER_SECOND 60
+
 #define GRID_COLS       5
 #define GRID_MAX_ROWS   4
 #define GRID_MAX_TRACKS (GRID_COLS * GRID_MAX_ROWS)
@@ -268,6 +308,8 @@ void runCDPlayer(
 	uint16_t  lastButtons   = 0;
 	int       elapsedMin    = 0;
 	int       elapsedSec    = 0;
+	/* Drives the elapsed display - see the note in the playing branch. */
+	int       elapsedFrames = 0;
 	int       discCheckTimer = 0;
 
 	char line[64];
@@ -350,7 +392,8 @@ void runCDPlayer(
 			if (pressed & PAD_BTN_CROSS) {
 				uint8_t param = decToBcd(currentTrack);
 				cdromCommand(CD_CMD_PLAY, &param, 1, response, sizeof(response));
-				playState = CD_PLAYING;
+				playState     = CD_PLAYING;
+				elapsedFrames = 0;
 			}
 			if (pressed & PAD_BTN_SQUARE) {
 				cdromCommand(CD_CMD_PAUSE, NULL, 0, response, sizeof(response));
@@ -358,47 +401,75 @@ void runCDPlayer(
 			}
 			if (pressed & PAD_BTN_CIRCLE) {
 				cdromCommand(CD_CMD_STOP, NULL, 0, response, sizeof(response));
-				playState  = CD_STOPPED;
-				elapsedMin = 0;
-				elapsedSec = 0;
+				playState     = CD_STOPPED;
+				elapsedMin    = 0;
+				elapsedSec    = 0;
+				elapsedFrames = 0;
 			}
 
 			if (playState == CD_PLAYING) {
-				uint8_t loc[16];
-				int locLen = cdromCommand(
-					CD_CMD_GETLOCP, NULL, 0, loc, sizeof(loc)
-				);
-				if (locLen >= 4) {
-					elapsedMin = bcdToDec(loc[2]);
-					elapsedSec = bcdToDec(loc[3]);
-				}
+				/*
+				 * Elapsed time is counted in frames, not asked of the drive.
+				 *
+				 * GetLocP blocks until the controller answers, and that wait
+				 * is long enough to push the frame past vblank - which showed
+				 * up as the title line tearing for exactly as long as a track
+				 * was playing. Throttling it only made the tear periodic
+				 * instead of constant, because the stall itself is the
+				 * problem, not how often it happens.
+				 *
+				 * A frame counter has no stall at all. The display shows
+				 * whole seconds and a track runs a few minutes, so the drift
+				 * against the drive's own clock is not visible. The counter
+				 * is re-seeded from the drive on play/pause/track change,
+				 * which are user-initiated and already pause briefly.
+				 */
+				elapsedFrames++;
+
+				int seconds = elapsedFrames / CD_FRAMES_PER_SECOND;
+
+				elapsedMin = seconds / 60;
+				elapsedSec = seconds % 60;
 			}
 		}
 
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
-		printString(ctx, 16, 10, 0x808080, "CD MUSIC PLAYER");
+		// Follow the wallpaper, refreshed every frame so a theme change in
+		// Settings shows up here immediately.
+		xmbGetAccentColor(&cdAccent, &cdGlow);
+
+		printString(ctx, 16, CD_TITLE_Y, 0x808080, "CD MUSIC PLAYER");
 
 		if (!haveDisc) {
-			printString(ctx, 24, 44, 0x808080, "No disc / no tracks found");
-			printString(ctx, 24, 56, 0x808080, "Insert an audio CD or game disc");
-			printString(ctx, 24, 68, 0x505050, "(checking automatically...)");
+			printString(ctx, 24, CD_GRID_Y + 12, 0x808080, "No disc / no tracks found");
+			printString(ctx, 24, CD_GRID_Y + 24, 0x808080, "Insert an audio CD or game disc");
+			printString(ctx, 24, CD_GRID_Y + 36, 0x505050, "(checking automatically...)");
 		} else {
 			for (int t = 0; t < shownTracks; t++) {
 				int trackNum = firstTrack + t;
 				int col      = t % GRID_COLS;
 				int row      = t / GRID_COLS;
 				int x        = 24 + col * 52;
-				int y        = 26 + row * 20;
+				int y        = CD_GRID_Y + row * 20;
 
 				bool isCurrent = (trackNum == currentTrack);
 				bool isPlaying = isCurrent && (playState == CD_PLAYING);
 
-				drawRect(
+				// Same crystal tiles as the memory card grid, tinted from the
+				// current theme so the track list follows the wallpaper.
+				// The playing track gets the accent at full strength and a
+				// glow; the merely selected one gets the glow alone, which
+				// keeps "selected" and "playing" distinguishable at a glance.
+				uint32_t tint = isPlaying
+				              ? cdAccent
+				              : glassShade(cdAccent, 2, 5);
+
+				drawGlassPanel(
 					ctx, x, y, 44, 16,
-					isPlaying ? 0x1256e3 : (isCurrent ? 0x505050 : 0x282828),
-					false
+					tint,
+					(isPlaying || isCurrent) ? cdGlow : 0
 				);
 
 				snprintf(line, sizeof(line), "%02d", trackNum);
@@ -410,14 +481,14 @@ void runCDPlayer(
 					line, sizeof(line), "(+%d more, use LEFT/RIGHT)",
 					lastTrack - GRID_MAX_TRACKS
 				);
-				printString(ctx, 24, 108, 0x505050, line);
+				printString(ctx, 24, CD_MORE_Y, 0x505050, line);
 			}
 
 			snprintf(
 				line, sizeof(line), "TRACK %02d/%02d  TIME %02d:%02d",
 				currentTrack, lastTrack, elapsedMin, elapsedSec
 			);
-			printString(ctx, 24, 122, 0xffffff, line);
+			printString(ctx, 24, CD_TRACKTIME_Y, 0xffffff, line);
 
 			const char *stateText;
 			switch (playState) {
@@ -425,25 +496,25 @@ void runCDPlayer(
 				case CD_PAUSED:  stateText = "|| PAUSED"; break;
 				default:         stateText = "[] STOPPED"; break;
 			}
-			printString(ctx, 24, 134, 0x1256e3, stateText);
+			printString(ctx, 24, CD_STATE_Y, 0x1256e3, stateText);
 
 			snprintf(
 				line, sizeof(line), "VOLUME %3d%%   REVERB: %s",
 				(cdVolume * 100) / CD_VOL_MAX, REVERB_NAMES[reverbPreset]
 			);
-			printString(ctx, 24, 148, 0xffffff, line);
+			printString(ctx, 24, CD_VOLUME_Y, 0xffffff, line);
 
 			printString(
-				ctx, 16, 172, 0x505050,
+				ctx, 16, CD_CONTROLS1_Y, 0x505050,
 				CH_PS1_CROSS_BUTTON " PLAY   "
 				CH_PS1_SQUARE_BUTTON " PAUSE   "
 				CH_PS1_CIRCLE_BUTTON " STOP   "
 				CH_PS1_TRIANGLE_BUTTON " REVERB"
 			);
-			printString(ctx, 16, 184, 0x505050, "D-PAD select   R2/L2 volume");
+			printString(ctx, 16, CD_CONTROLS2_Y, 0x505050, "D-PAD select   R2/L2 volume");
 		}
 
-		printString(ctx, 16, 218, 0x505050, "START+SELECT: return to menu");
+		printString(ctx, 16, CD_EXIT_HINT_Y, 0x505050, "START+SELECT: return to menu");
 
 		endFrame(ctx);
 	}

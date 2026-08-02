@@ -165,7 +165,11 @@ void runMusicSettings(RenderContext *ctx, UIState *state, const MenuItem *item) 
 				snprintf(line, sizeof(line), "%s %s%s",
 					isSel ? ">" : " ", valueName(catIndex, i),
 					(i == applied) ? " *" : "");
-				printString(ctx, valX, y, isSel ? 0xffffff : 0x808080, line);
+				// Greyed out if this build does not contain the track.
+				bool avail = (catIndex != CAT_BGM) || bgmTrackAvailable(i);
+				printString(ctx, valX, y,
+					!avail  ? 0x303030 :
+					isSel   ? 0xffffff : 0x808080, line);
 				y += 16;
 			}
 		}

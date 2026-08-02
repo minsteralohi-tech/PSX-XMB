@@ -146,17 +146,6 @@ static void resetConfig(
 
 static const MenuItem ramConfigMenu[] = {
 	{
-		.name = "Warning: sizes above what's physically installed can",
-		.type = ITEM_STATIC
-	}, {
-		.name = "hang real hardware immediately on Apply - the test",
-		.type = ITEM_STATIC
-	}, {
-		.name = "itself is clamped safely, but this raw register isn't.",
-		.type = ITEM_STATIC
-	}, {
-		.type = ITEM_SEPARATOR
-	}, {
 		.name     = "Bank size",
 		.type     = ITEM_ENUM,
 		.minValue = 0,

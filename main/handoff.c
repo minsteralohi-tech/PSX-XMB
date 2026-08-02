@@ -17,7 +17,85 @@
 #define DMA_DRAIN_TIMEOUT 0x100000u
 
 static void quiesceCommon(void) {
-	// 0. Put both serial buses back to a neutral state.
+	// 0. Reset the CD-ROM controller.
+	//
+	//    Visiting the CD player and coming back leaves the controller in a
+	//    state UniROM will not start from - "black screen, but only if you
+	//    went into the CD player first". Launching straight from the menu is
+	//    fine because the drive was never started.
+	//
+	//    Two earlier attempts sent CdlStop (0x08) and failed. CdlStop only
+	//    halts playback; it does not clear the controller's mode, its FIFOs,
+	//    or the BIOS CD driver's idea of what is going on - and cd_player.c
+	//    drives these registers directly, behind the BIOS's back, so that
+	//    idea is already stale by the time we get here.
+	//
+	//    CdlInit (0x0A) is the real reset: it aborts whatever is in flight,
+	//    restores the default mode and stops the motor, which is the state a
+	//    freshly booted program expects to find.
+	//
+	//    Every wait is bounded. cd_player.c's own helpers spin forever on
+	//    BUSYSTS, which is fine while the dashboard is running and completely
+	//    unacceptable here - a controller that never goes idle must not take
+	//    the hand-off down with it.
+	{
+		volatile uint8_t *cd = (volatile uint8_t *) 0x1f801800;
+		unsigned guard;
+
+		// Clear anything outstanding first, or the command below is dropped.
+		cd[0] = 1;                                   // index 1
+		cd[3] = 0x1f;                                // ack INT1..INT5
+		cd[3] = 0x40;                                // reset the parameter FIFO
+		cd[2] = 0x00;                                // disable CD interrupts
+		cd[0] = 0;                                   // index 0
+
+		guard = 0x100000;
+		while ((cd[0] & 0x80) && --guard)             // BUSYSTS
+			;
+
+		cd[1] = 0x0a;                                // CdlInit
+
+		// CdlInit answers INT3 and then INT2 when the reset completes. Poll
+		// the interrupt flag rather than BUSYSTS: BUSYSTS only covers the
+		// parameter transfer, and can read idle while the reset is still
+		// running.
+		for (int phase = 0; phase < 2; phase++) {
+			guard = 0x400000;
+
+			for (;;) {
+				cd[0] = 1;
+				uint8_t flags = cd[3] & 0x07;
+				cd[0] = 0;
+
+				if (flags)
+					break;
+
+				if (!--guard)
+					break;
+			}
+
+			cd[0] = 1;
+			cd[3] = 0x1f;                            // acknowledge it
+			cd[0] = 0;
+		}
+
+		cd[0] = 1;
+		cd[3] = 0x40;                                // FIFOs clear
+		cd[2] = 0x00;
+		cd[0] = 0;
+	}
+
+	// 0b. Mute the SPU's CD audio input.
+	//
+	//     cd_player.c routes CD-DA through the SPU by setting the CD input
+	//     volume and SPU_CTRL's CD-audio-enable bit. Silencing the voices is
+	//     not enough on its own - this is a separate path into the mixer, and
+	//     leaving it open means the next program inherits it.
+	*(volatile uint32_t *) 0x1f801db0 = 0;          // CD input volume L/R
+	*(volatile uint16_t *) 0x1f801daa &=
+		(uint16_t) ~0x0001;                          // SPU_CTRL: CD audio off
+
+	// 1. Put both serial buses back to a neutral state.
 	//
 	//    main.c calls initSerialIO(115200) and initControllerBus(), so SIO1
 	//    is configured for 115200 8N2 and SIO0 is set up for this dashboard's

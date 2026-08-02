@@ -45,6 +45,10 @@ void playBGM(void);
 // those channels will interrupt whatever they were doing, so the caller
 // is responsible for restoring normal playback afterward (see
 // initSound()/playBGM()).
+/* System notification chime - the disc detection card. Independent of the
+ * user's chosen SFX set, but still muted by the SFX toggle. */
+void playNotifySound(void);
+
 void playTestTone(int channel);
 
 // Toggles background music on/off (mutes/restores its volume - doesn't
@@ -60,6 +64,14 @@ bool isBGMEnabled(void);
 int         getBGMCount(void);
 int         getBGMIndex(void);
 const char *getBGMName(int index);
+
+/*
+ * Whether a listed track is actually embedded in this build. Tracks can be
+ * dropped from CMakeLists.txt to free RAM; they stay in the list so they do
+ * not silently vanish, but the picker greys them out and selectBGM() refuses
+ * them. Returns 0 for an unavailable or out-of-range index.
+ */
+int bgmTrackAvailable(int index);
 // Switch to BGM track `index` (0..getBGMCount()-1). No-op if already current.
 void        selectBGM(int index);
 
