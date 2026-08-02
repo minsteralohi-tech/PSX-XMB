@@ -48,6 +48,11 @@ static int currentSFXSet = 0;
 // sound effects.
 extern const uint8_t spuTestSound[];
 
+/* Notification chime, played when the disc notification card appears. Kept
+ * separate from the three SFX sets: it is a system sound, not part of the
+ * navigation theme the user picks. */
+extern const uint8_t notifySound[];
+
 // The BGM tracks (ps3xmb.vag / ps4xmb.vag), embedded via addBinaryFile().
 // Downsampled to 11025 Hz rather than 44.1 kHz - PS-ADPCM size scales directly
 // with sample rate, and at full quality these would need close to 2 MB on
@@ -110,6 +115,7 @@ static uint32_t swapEndian(uint32_t value) {
 static uint32_t sfxOffsets[SFX_SET_COUNT][3];
 static uint32_t bgmSoundOffset     = 0;
 static uint32_t spuTestSoundOffset = 0;
+static uint32_t notifySoundOffset  = 0;
 static uint32_t spuRAMUsedBytes    = 0;   // set in initSound(), see getSPURAMUsedBytes()
 
 static bool bgmEnabled = true;
@@ -177,6 +183,9 @@ void initSound(void) {
 	// Place the SPU test tone right after the reserved BGM slot.
 	spuTestSoundOffset = bgmSoundOffset + bgmSlotSize;
 	spuRAMUsedBytes     = spuTestSoundOffset + uploadVAG(spuTestSound, spuTestSoundOffset);
+
+	notifySoundOffset = spuRAMUsedBytes;
+	spuRAMUsedBytes   = notifySoundOffset + uploadVAG(notifySound, notifySoundOffset);
 }
 
 uint32_t getSPURAMUsedBytes(void) {
@@ -228,6 +237,14 @@ void playConfirmSound(void) {
 void playCancelSound(void) {
 	if (sfxEnabled)
 		playSample(sfxSets[currentSFXSet].cancel, sfxOffsets[currentSFXSet][2], CANCEL_CHANNEL);
+}
+
+void playNotifySound(void) {
+	// Uses the cancel channel rather than a fourth voice: notifications are
+	// rare and never overlap navigation clicks in practice, and adding a
+	// channel would mean re-checking the SPU channel budget everywhere.
+	if (sfxEnabled)
+		playSample(notifySound, notifySoundOffset, CANCEL_CHANNEL);
 }
 
 void playTestTone(int channel) {

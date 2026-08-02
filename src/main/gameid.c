@@ -66,11 +66,18 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "main/font.h"
+#include "main/sound.h"
 #include "main/gameid.h"
 #include "main/renderer.h"
 #include "main/xmb_bg.h"
 
 static GameIdState current;
+
+/* Chime whenever the card appears, including the "Reading disc..." step so
+ * the user gets feedback the instant the drive is touched. */
+static void gameIdNoticeSound(void) {
+	playNotifySound();
+}
 
 /* --- game name database ------------------------------------------------- *
  *
@@ -267,14 +274,24 @@ static int cdWaitInt(unsigned guard) {
 	}
 }
 
+/* Result bytes from the last command, for GetStat and GetTN. */
+static uint8_t cdResult[8];
+static int     cdResultLen;
+
 /* Drain every pending result byte, then acknowledge. Point 2 above. */
 static void cdDrainAndAck(void) {
 	CDREG0 = 0;
 
 	unsigned guard = 64;
 
-	while ((CDREG0 & ST_RSLRRDY) && --guard)
-		(void) CDREG1;
+	cdResultLen = 0;
+
+	while ((CDREG0 & ST_RSLRRDY) && --guard) {
+		uint8_t b = CDREG1;
+
+		if (cdResultLen < (int) sizeof(cdResult))
+			cdResult[cdResultLen++] = b;
+	}
 
 	CDREG0 = 1;
 	CDREG3 = 0x1f;      /* ack INT1..INT5      */
@@ -409,12 +426,26 @@ static uint32_t rd32(const uint8_t *p) {
  * 16, take the root directory extent from PVD offset 0x9E, then walk the
  * records looking for the name.
  */
-static int readSystemCnf(uint8_t *scratch, int scratchSize) {
-	if (scratchSize < 2048)
-		return 0;
+#define CMD_GETSTAT 0x01
+#define CMD_GETTN   0x13
+#define CMD_INIT    0x0a
 
-	cdBegin();
+/*
+ * True if the drive reports an audio disc: GetTN answers with a track count
+ * and the disc has no ISO9660 volume descriptor.
+ */
+static bool cdIsAudioDisc(void) {
+	if (cdCommand(CMD_GETTN, NULL, 0) != 3 || cdResultLen < 3)
+		return false;
 
+	/* Response is stat, first track (BCD), last track (BCD). */
+	uint8_t last = cdResult[2];
+	int     lastTrack = ((last >> 4) & 0x0f) * 10 + (last & 0x0f);
+
+	return lastTrack > 0;
+}
+
+static int readSystemCnfOnce(uint8_t *scratch) {
 	int result = 0;
 
 	if (cdReadSectors(16, scratch, 1) &&
@@ -468,8 +499,69 @@ static int readSystemCnf(uint8_t *scratch, int scratchSize) {
 		}
 	}
 
+	return result;
+}
+
+/*
+ * Read SYSTEM.CNF, retrying because the first attempt after a disc change
+ * reliably fails.
+ *
+ * Swapping a disc leaves the controller holding state for the disc that is
+ * gone: the first Setloc/ReadN answers from the old TOC and errors out, and
+ * only the following attempt sees the new disc. That is exactly the reported
+ * behaviour - press R1 once and get "Disc not readable", press it again and
+ * the name appears.
+ *
+ * The fix is to make one scan do what the user was doing by hand. Init (0x0A)
+ * resets the controller and makes it re-read the TOC, and the read is then
+ * attempted up to three times. Returns bytes read, GAMEID_AUDIO_DISC_MARKER
+ * for an audio CD, or 0.
+ */
+#define GAMEID_AUDIO_DISC_MARKER (-2)
+
+static int readSystemCnf(uint8_t *scratch, int scratchSize) {
+	if (scratchSize < 2048)
+		return 0;
+
+	cdBegin();
+
+	/* Reset the controller so it re-reads the table of contents. Without
+	 * this the first attempt after a swap sees the previous disc. */
+	cdCommand(CMD_INIT, NULL, 0);
+	cdCommand(CMD_GETSTAT, NULL, 0);
+
+	int result = 0;
+
+	for (int attempt = 0; attempt < 3 && result == 0; attempt++) {
+		result = readSystemCnfOnce(scratch);
+
+		if (result == 0) {
+			/* Nudge the drive and let it settle before trying again. */
+			cdCommand(CMD_PAUSE, NULL, 0);
+			cdCommand(CMD_GETSTAT, NULL, 0);
+		}
+	}
+
+	/* No ISO volume: it may still be a perfectly good audio CD. */
+	if (result == 0 && cdIsAudioDisc())
+		result = GAMEID_AUDIO_DISC_MARKER;
+
 	cdEnd();
 	return result;
+}
+
+/* Drive status byte, or 0xff. Used for lid detection; safe now because
+ * cdBegin() masks the BIOS handler for the duration. */
+static uint8_t cdPollStat(void) {
+	cdBegin();
+
+	uint8_t stat = 0xff;
+
+	if (cdCommand(CMD_GETSTAT, NULL, 0) && cdResultLen >= 1)
+		stat = cdResult[0];
+
+	cdEnd();
+	return stat;
 }
 
 /*
@@ -550,6 +642,12 @@ void gameIdClearNotice(void) {
 static void gameIdReadDisc(uint8_t *scratch, int scratchSize) {
 	int got = readSystemCnf(scratch, scratchSize);
 
+	if (got == GAMEID_AUDIO_DISC_MARKER) {
+		current.state = GAMEID_AUDIO_CD;
+		current.id[0] = '\0';
+		return;
+	}
+
 	if (got <= 0) {
 		current.state = GAMEID_NO_DISC;
 		current.id[0] = '\0';
@@ -603,8 +701,11 @@ void gameIdRequestScan(void) {
 }
 
 void gameIdPoll(uint8_t *scratch, int scratchSize) {
-	static bool bootScanDone = false;
-	static int  bootDelay    = 180;
+	static bool wasOpen   = false;
+	static bool primed    = false;
+	static int  bootDelay = 180;
+	static int  pollDelay = 0;
+	static int  settle    = 0;
 
 	if (current.noticeTime > 0)
 		current.noticeTime--;
@@ -612,38 +713,91 @@ void gameIdPoll(uint8_t *scratch, int scratchSize) {
 	if (scratchSize < GAMEID_SCRATCH_SIZE)
 		return;
 
-	/* One scan a few seconds after boot, once the splash is out of the way
-	 * and the drive has had time to settle. */
-	if (!bootScanDone) {
-		if (bootDelay > 0) {
-			bootDelay--;
+	/* Let the splash clear and the drive settle before the first scan. */
+	if (bootDelay > 0) {
+		bootDelay--;
+
+		if (bootDelay == 0)
+			gameIdRequestScan();
+
+		return;
+	}
+
+	/* A scan is queued or in progress: that takes priority over polling. */
+	if (scanCountdown >= 0) {
+		if (scanCountdown > 0) {
+			scanCountdown--;
+
+			if (scanCountdown == 0) {
+				/* Card first, read next frame - the user sees it appear,
+				 * then the pause, then the result. */
+				current.state      = GAMEID_READING;
+				current.id[0]      = '\0';
+				current.noticeTime = GAMEID_NOTICE_FRAMES;
+				gameIdNoticeSound();
+			}
+
 			return;
 		}
 
-		bootScanDone = true;
-		gameIdRequestScan();
+		scanCountdown = -1;
+		gameIdReadDisc(scratch, scratchSize);
+		current.noticeTime = GAMEID_NOTICE_FRAMES;
+		gameIdNoticeSound();
+		return;
 	}
 
-	if (scanCountdown < 0)
-		return;
+	/* Waiting for a newly closed lid to spin up. */
+	if (settle > 0) {
+		settle--;
 
-	if (scanCountdown > 0) {
-		scanCountdown--;
-
-		if (scanCountdown == 0) {
-			/* Card first, read next frame - the user sees it appear, then
-			 * the pause, then the result. */
-			current.state      = GAMEID_READING;
-			current.id[0]      = '\0';
-			current.noticeTime = GAMEID_NOTICE_FRAMES;
-		}
+		if (settle == 0)
+			gameIdRequestScan();
 
 		return;
 	}
 
-	scanCountdown      = -1;
-	gameIdReadDisc(scratch, scratchSize);
-	current.noticeTime = GAMEID_NOTICE_FRAMES;
+	/*
+	 * Lid polling.
+	 *
+	 * This is safe now, where the version that crashed was not: cdPollStat()
+	 * goes through cdBegin()/cdEnd(), so the BIOS CD interrupt handler is
+	 * masked for the duration of the command and cannot race us. It is one
+	 * GetStat every ~20 frames, which is far cheaper than a read.
+	 */
+	if (pollDelay > 0) {
+		pollDelay--;
+		return;
+	}
+
+	pollDelay = 20;
+
+	uint8_t stat = cdPollStat();
+
+	if (stat == 0xff)
+		return;
+
+	bool isOpen = (stat & 0x10) != 0;   /* ShellOpen */
+
+	if (!primed) {
+		/* First reading: adopt it without reacting, so booting with the lid
+		 * shut does not immediately look like an insertion. */
+		primed  = true;
+		wasOpen = isOpen;
+		return;
+	}
+
+	if (isOpen && !wasOpen) {
+		current.state = GAMEID_IDLE;
+		current.id[0] = '\0';
+	}
+
+	if (!isOpen && wasOpen) {
+		/* Give the drive ~1.5s to spin up before asking it for sectors. */
+		settle = 90;
+	}
+
+	wasOpen = isOpen;
 }
 
 /* --- corner notification ------------------------------------------------ */
@@ -684,6 +838,10 @@ void drawGameIdNotice(RenderContext *ctx) {
 
 	case GAMEID_READING:
 		value = "Reading disc...";
+		break;
+
+	case GAMEID_AUDIO_CD:
+		value = "Audio CD";
 		break;
 
 	case GAMEID_NO_DISC:

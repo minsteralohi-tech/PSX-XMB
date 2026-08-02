@@ -36,7 +36,8 @@ typedef enum {
 	GAMEID_FOUND,      /* id[] holds a boot name                 */
 	GAMEID_NO_DISC,    /* disc unreadable or not ISO9660         */
 	GAMEID_UNKNOWN,    /* readable, but no usable BOOT= line     */
-	GAMEID_UNLISTED    /* boot name read, but not in the table    */
+	GAMEID_UNLISTED,   /* boot name read, but not in the table    */
+	GAMEID_AUDIO_CD    /* no ISO volume, but the drive has tracks  */
 } GameIdResult;
 
 typedef struct {

@@ -399,13 +399,32 @@ void runCDPlayer(
 			}
 
 			if (playState == CD_PLAYING) {
-				uint8_t loc[16];
-				int locLen = cdromCommand(
-					CD_CMD_GETLOCP, NULL, 0, loc, sizeof(loc)
-				);
-				if (locLen >= 4) {
-					elapsedMin = bcdToDec(loc[2]);
-					elapsedSec = bcdToDec(loc[3]);
+				/*
+				 * Ask the drive for the elapsed time twice a second, not
+				 * every frame.
+				 *
+				 * GetLocP blocks until the controller answers, and that wait
+				 * is long enough to push the frame past vblank - which shows
+				 * up as tearing and black lines across the top of the screen
+				 * for exactly as long as a track is playing, and disappears
+				 * the moment it stops. The display only shows whole seconds,
+				 * so 30 frames between queries loses nothing.
+				 */
+				static int locPollDelay = 0;
+
+				if (locPollDelay > 0) {
+					locPollDelay--;
+				} else {
+					locPollDelay = 30;
+
+					uint8_t loc[16];
+					int locLen = cdromCommand(
+						CD_CMD_GETLOCP, NULL, 0, loc, sizeof(loc)
+					);
+					if (locLen >= 4) {
+						elapsedMin = bcdToDec(loc[2]);
+						elapsedSec = bcdToDec(loc[3]);
+					}
 				}
 			}
 		}

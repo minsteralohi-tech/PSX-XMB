@@ -45,6 +45,10 @@ void playBGM(void);
 // those channels will interrupt whatever they were doing, so the caller
 // is responsible for restoring normal playback afterward (see
 // initSound()/playBGM()).
+/* System notification chime - the disc detection card. Independent of the
+ * user's chosen SFX set, but still muted by the SFX toggle. */
+void playNotifySound(void);
+
 void playTestTone(int channel);
 
 // Toggles background music on/off (mutes/restores its volume - doesn't
