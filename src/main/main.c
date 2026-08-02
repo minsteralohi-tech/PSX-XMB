@@ -22,6 +22,7 @@
 #include "main/font.h"
 #include "main/hud.h"
 #include "main/icon.h"
+#include "main/gameid.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
 #include "main/sound.h"
@@ -86,8 +87,17 @@ int main(int argc, const char **argv) {
 	initSystemHUD();
 	enterMainMenu(&ctx, &state, 0);
 
+	// One ISO9660 sector, reused by the game ID reader. Static rather than a
+	// local: 2 KB is far more than this stack wants to carry.
+	static uint8_t gameIdScratch[GAMEID_SCRATCH_SIZE];
+
+	gameIdInit();
+
 	for (;;) {
 		uint16_t buttons = pollController(0) | pollController(1);
+
+		// Watch the CD lid. Cheap on almost every frame - see gameid.h.
+		gameIdPoll(gameIdScratch, sizeof(gameIdScratch));
 
 		beginFrame(&ctx);
 
@@ -131,6 +141,8 @@ int main(int argc, const char **argv) {
 				printString(&ctx, 16, 206, 0x505050, toggleLine2);
 			}
 		}
+
+		drawGameIdNotice(&ctx);
 
 		endFrame(&ctx);
 	}
