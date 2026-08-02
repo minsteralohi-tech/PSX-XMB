@@ -92,6 +92,7 @@ addPS1Executable(
 	src/main/badge.c
 	src/main/launch_ui.c
 	src/main/app_launch.c
+	src/main/gameid.c
 	src/main/app_stub.s
 	src/main/music_settings.c
 	src/main/unirom_launch.c

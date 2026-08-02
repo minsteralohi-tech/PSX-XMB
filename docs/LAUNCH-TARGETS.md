@@ -11,29 +11,7 @@ and it works. This file exists so the reasoning is not lost.
 | UniROM 8.0 | `0x801D0000` | no | direct | no | Works under every combination *now*. See the TTY note below |
 | 240p Test Suite | `0x80010000` | **yes** | **stage 1** | **yes** | Lands on the dashboard, so the trampoline is mandatory. Declares **no BSS**, so it needs RAM zeroed first |
 
-| **Sony 4.1 BIOS** | `0x8002F000` | **yes** | **stage 1** | ? | UNPROVEN - its menu entry exposes the toggles instead of fixing them |
-
-### Testing the Sony 4.1 BIOS shell
-
-It lands on the dashboard (`0x8002F000`-`0x8007C000`), so stage 1 is mandatory
-and `Exec()` is unavailable - `planUseBiosExec()` refuses it, which the tests
-pin down. That leaves one variable, the RAM erase, so the screen shows the plan
-and both toggles:
-
-| Button | Effect |
-|---|---|
-| Triangle | erase RAM on/off, re-plans |
-| Square | BIOS `Exec()` - will refuse here, by design |
-| Cross | launch |
-| Circle | back |
-
-Start with **erase RAM = YES** (the default). That is what the 240p suite
-needed, and it is the other target that loads over the dashboard. If it fails,
-try erase = no. Report which combination was on screen and what happened -
-`Target`, `Source`, `Arena` and `Path` are all displayed before you commit.
-
-Stage 1 still verifies the copy, so a dark-olive screen means the payload did
-not arrive intact and the fault is before the jump rather than in the BIOS.
+| Sony 4.1 BIOS | `0x8002F000` | **yes** | **stage 1** | **yes** | Works either way; takes the erase because it goes on to boot a game |
 
 ## The two things that actually mattered
 
