@@ -129,7 +129,17 @@ static const SpriteInfo fontSprites[] = {
 	{ .x = 50, .y = 54, .width = 10, .height = 10 }, // Triangle
 	{ .x = 60, .y = 54, .width = 10, .height = 10 }, // Square
 	{ .x = 70, .y = 54, .width =  7, .height = 10 }, // Select
-	{ .x = 80, .y = 54, .width =  7, .height = 10 }  // Start
+	{ .x = 80, .y = 54, .width =  7, .height = 10 }, // Start
+
+	// D-pad direction glyph, char 0x89. A single "Up" petal shape, drawn
+	// once. Right/Down/Left are NOT separate art - see printDpadDirection()
+	// below, which renders this same sprite rotated in 90-degree steps by
+	// permuting its texture coordinates per corner. That only works through
+	// a real 4-vertex quad primitive, not through this table/printString: a
+	// Rectangle primitive (what printString uses) has one fixed UV origin
+	// and cannot be rotated, so 0x89 typed inline in a string always renders
+	// as "Up" - use printDpadDirection() directly for the other three.
+	{ .x = 88, .y = 54, .width =  6, .height =  8 }  // D-pad Up
 };
 
 void printString(
@@ -169,7 +179,7 @@ void printString(
 				currentX += FONT_SPACE_WIDTH;
 				continue;
 
-			case 0x89 ... 0xff:
+			case 0x8a ... 0xff:
 				ch = 0x7f;
 				break;
 		}
@@ -228,7 +238,7 @@ int getStringWidth(const char *str) {
 				currentX += FONT_SPACE_WIDTH;
 				continue;
 
-			case 0x89 ... 0xff:
+			case 0x8a ... 0xff:
 				ch = 0x7f;
 				break;
 		}
@@ -292,7 +302,7 @@ void printStringScaled(
 				currentX += spaceWidth;
 				continue;
 
-			case 0x89 ... 0xff:
+			case 0x8a ... 0xff:
 				ch = 0x7f;
 				break;
 		}
@@ -332,4 +342,90 @@ void printStringScaled(
 int getStringWidthScaled(const char *str, int scalePercent) {
 	int native = getStringWidth(str);
 	return scaleDim(native, scalePercent);
+}
+
+/*
+ * D-pad direction glyph, rotated in 90-degree steps.
+ *
+ * printString cannot do this: it draws every glyph with the GPU's Rectangle
+ * primitive, which has a single fixed texture origin and size and no notion
+ * of rotation. A genuine 4-vertex textured quad does not have that
+ * limitation - each corner gets its own UV coordinate, so "rotating" the
+ * image is just choosing which texture corner lands on which screen corner.
+ * Since both texture space and screen space use the same y-down convention
+ * on this hardware, that is a standard image-rotation-by-corner-permutation
+ * problem, and the same one icon.c's iconQuad() already solves for icons -
+ * this reuses that primitive shape, just for the one font glyph at 0x89.
+ *
+ * Always drawn in the glyph's true colours (a neutral 0x808080 vertex
+ * colour), matching how every other button glyph in this font ignores the
+ * colour passed to printString and shows its own baked-in colour.
+ */
+void printDpadDirection(
+	RenderContext *ctx, int x, int y, DpadDirection direction
+) {
+	const SpriteInfo *sprite = &fontSprites[0x89 - FONT_FIRST_TABLE_CHAR];
+
+	int u0 = ctx->font.u + sprite->x;
+	int v0 = ctx->font.v + sprite->y;
+	int u1 = u0 + sprite->width  - 1;
+	int v1 = v0 + sprite->height - 1;
+
+	// Destination size: swapped for the two sideways orientations, since the
+	// source glyph is not square (6x8).
+	int dstW = sprite->width;
+	int dstH = sprite->height;
+
+	if (direction == DPAD_DIR_RIGHT || direction == DPAD_DIR_LEFT) {
+		dstW = sprite->height;
+		dstH = sprite->width;
+	}
+
+	// Which texture corner (of the unrotated source) lands at each screen
+	// corner (TL/TR/BL/BR), derived from rotating the source image the
+	// requested number of 90-degree steps clockwise. "Up" is the identity
+	// case: no rotation, screen corners map straight to texture corners.
+	int tlU, tlV, trU, trV, blU, blV, brU, brV;
+
+	switch (direction) {
+		case DPAD_DIR_RIGHT: // source rotated 90 degrees clockwise
+			tlU = u0; tlV = v1;  trU = u0; trV = v0;
+			blU = u1; blV = v1;  brU = u1; brV = v0;
+			break;
+
+		case DPAD_DIR_DOWN: // 180 degrees
+			tlU = u1; tlV = v1;  trU = u0; trV = v1;
+			blU = u1; blV = v0;  brU = u0; brV = v0;
+			break;
+
+		case DPAD_DIR_LEFT: // 270 degrees clockwise (90 counter-clockwise)
+			tlU = u1; tlV = v0;  trU = u1; trV = v1;
+			blU = u0; blV = v0;  brU = u0; brV = v1;
+			break;
+
+		case DPAD_DIR_UP:
+		default:
+			tlU = u0; tlV = v0;  trU = u1; trV = v0;
+			blU = u0; blV = v1;  brU = u1; brV = v1;
+			break;
+	}
+
+	GPUDMAChain *chain = getCurrentChain(ctx);
+
+	uint32_t *page = allocateGP0Packet(chain, 1);
+	page[0] = gp0_setPage(ctx->font.page, false, false);
+
+	// Flat-shaded textured quad: cmd+colour, then 4 corners of (xy, uv). Same
+	// 9-word layout as icon.c's iconQuad(). Vertex order is TL, TR, BL, BR -
+	// the GPU forms the two triangles TL-TR-BL and TR-BL-BR from that.
+	uint32_t *ptr = allocateGP0Packet(chain, 9);
+	ptr[0] = 0x808080u | gp0_shadedQuad(false, true, true);
+	ptr[1] = gp0_xy(x, y);
+	ptr[2] = gp0_uv(tlU, tlV, ctx->font.clut);
+	ptr[3] = gp0_xy(x + dstW, y);
+	ptr[4] = gp0_uv(trU, trV, ctx->font.page);
+	ptr[5] = gp0_xy(x, y + dstH);
+	ptr[6] = gp0_uv(blU, blV, 0);
+	ptr[7] = gp0_xy(x + dstW, y + dstH);
+	ptr[8] = gp0_uv(brU, brV, 0);
 }

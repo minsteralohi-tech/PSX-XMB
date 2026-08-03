@@ -44,3 +44,11 @@
 #define CH_PS1_SQUARE_BUTTON   "\x86"
 #define CH_PS1_SELECT_BUTTON   "\x87"
 #define CH_PS1_START_BUTTON    "\x88"
+
+/*
+ * D-pad direction glyph. Only usable inline (in a printString() string) as
+ * Up - the Rectangle primitive printString draws with cannot be rotated. For
+ * Right/Down/Left, call printDpadDirection() from font.h directly instead of
+ * putting this in a string; see the comment there.
+ */
+#define CH_PS1_DPAD_UP          "\x89"
