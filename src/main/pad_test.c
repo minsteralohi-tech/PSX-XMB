@@ -255,27 +255,50 @@ static void drawLabeledButton(
 	printString(ctx, x + 3, y + 2, pressed ? 0x000000 : 0x808080, label);
 }
 
-// D-pad: back to the original, simplest version from the very first pad
-// tester build - plain U/D/L/R text labels via drawLabeledButton, the
-// same function already used successfully for L1/L2/R1/R2/L3/R3
-// throughout this whole file. After several attempts at a more elaborate
-// shape (triangles, a rect+triangle "house" shape, a texture-based icon),
-// none of them landed - this reverts back to the simple version that
-// actually worked, rather than continuing to iterate on a look that
-// hasn't come together. The offset (14px) and box size (14px) here are
-// the original values; only the D-pad's overall center position
-// (centerX, centerY, set by the caller) reflects the layout spacing
-// refined since then for the rest of the pad tester.
+// D-pad: the real direction glyph, drawn rotated per direction via
+// printDpadDirection() (font.c/.h). Earlier attempts at a non-text shape
+// here (triangles, a rect+triangle "house" shape) didn't land and this
+// screen fell back to plain U/D/L/R letters - see the git history. What
+// was missing then was a proper way to rotate a single piece of art in
+// 90-degree steps; printDpadDirection() is that, added when the D-pad
+// glyph itself was added to the font, so this is worth revisiting now.
+//
+// The button box still highlights on press exactly as it does for
+// L1/L2/R1/R2/L3/R3 (drawLabeledButton's HIGHLIGHT_COLOR). The glyph
+// itself does not change colour when pressed - it always renders in its
+// own baked colour, the same rule every other button glyph in this font
+// follows - so the box highlight is what carries the pressed state.
+static void drawDpadDirectionButton(
+	RenderContext *ctx,
+	int           x,
+	int           y,
+	int           w,
+	bool          pressed,
+	DpadDirection direction
+) {
+	drawRect(ctx, x, y, w, 12, pressed ? HIGHLIGHT_COLOR : 0x242424, false);
+
+	// The source art is 6x8; Left/Right render it sideways, so the box
+	// occupied on screen is 8x6 for those two. Centre whichever applies.
+	bool sideways = (direction == DPAD_DIR_LEFT) || (direction == DPAD_DIR_RIGHT);
+	int  glyphW   = sideways ? 8 : 6;
+	int  glyphH   = sideways ? 6 : 8;
+
+	printDpadDirection(
+		ctx, x + (w - glyphW) / 2, y + (12 - glyphH) / 2, direction
+	);
+}
+
 static void drawDpadIcon(
 	RenderContext *ctx,
 	int           centerX,
 	int           centerY,
 	uint16_t      buttons
 ) {
-	drawLabeledButton(ctx, centerX,      centerY - 14, 14, buttons & PAD_BTN_UP,    "U");
-	drawLabeledButton(ctx, centerX,      centerY + 14, 14, buttons & PAD_BTN_DOWN,  "D");
-	drawLabeledButton(ctx, centerX - 14, centerY,      14, buttons & PAD_BTN_LEFT,  "L");
-	drawLabeledButton(ctx, centerX + 14, centerY,      14, buttons & PAD_BTN_RIGHT, "R");
+	drawDpadDirectionButton(ctx, centerX,      centerY - 14, 14, buttons & PAD_BTN_UP,    DPAD_DIR_UP);
+	drawDpadDirectionButton(ctx, centerX,      centerY + 14, 14, buttons & PAD_BTN_DOWN,  DPAD_DIR_DOWN);
+	drawDpadDirectionButton(ctx, centerX - 14, centerY,      14, buttons & PAD_BTN_LEFT,  DPAD_DIR_LEFT);
+	drawDpadDirectionButton(ctx, centerX + 14, centerY,      14, buttons & PAD_BTN_RIGHT, DPAD_DIR_RIGHT);
 }
 
 static void drawAnalogStick(
