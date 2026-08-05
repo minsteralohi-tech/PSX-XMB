@@ -49,6 +49,40 @@ void drawCategoryIconGradient(
 	uint32_t cTop, uint32_t cBot
 );
 
+
+/*
+ * Pad tester button glyphs (see drawPadGlyph in icon.c).
+ *
+ * One sheet holds both states: cells 0..14 unpressed, +PAD_GLYPH_PRESSED for
+ * the pressed version of the same button. The pressed state is a different
+ * piece of artwork rather than a colour or a highlight box behind the glyph.
+ */
+#define PAD_GLYPH_W       18
+#define PAD_GLYPH_H       16
+#define PAD_GLYPH_COLS     8
+#define PAD_GLYPH_CELLS   32
+#define PAD_GLYPH_PRESSED 16
+
+typedef enum {
+	PAD_GLYPH_CIRCLE = 0,
+	PAD_GLYPH_CROSS,
+	PAD_GLYPH_TRIANGLE,
+	PAD_GLYPH_SQUARE,
+	PAD_GLYPH_SELECT,
+	PAD_GLYPH_START,
+	PAD_GLYPH_L1,
+	PAD_GLYPH_R1,
+	PAD_GLYPH_L2,
+	PAD_GLYPH_R2,
+	PAD_GLYPH_STICK,
+	PAD_GLYPH_DPAD_UP,
+	PAD_GLYPH_DPAD_DOWN,
+	PAD_GLYPH_DPAD_LEFT,
+	PAD_GLYPH_DPAD_RIGHT
+} PadGlyph;
+
+void drawPadGlyph(RenderContext *ctx, int index, int x, int y);
+
 #ifdef __cplusplus
 }
 #endif

@@ -12,6 +12,7 @@
 // Sheets + palettes, embedded via addBinaryFile() in CMakeLists.txt.
 extern const uint8_t catTexture[],  catPalette[];
 extern const uint8_t itemTexture[], itemPalette[];
+extern const uint8_t padGlyphTexture[], padGlyphPalette[];
 
 #define ICON_CELL  64   // px per icon cell in both sheets
 #define ICON_COLS  4    // cells per row in both sheets
@@ -50,8 +51,22 @@ extern const uint8_t itemTexture[], itemPalette[];
 #define ITEM_CLUT_X   720
 #define ITEM_CLUT_Y   256
 
+/*
+ * Pad tester button glyphs. 8 x 4 grid of 18x16 cells: cells 0-14 are the
+ * unpressed glyphs, cells 16-30 the pressed ones, so a pressed lookup is just
+ * index + PAD_GLYPH_PRESSED. Sits after the item sheet in VRAM (144px at 4bpp
+ * = 36 columns, 832..868) with its CLUT after the other two.
+ */
+#define PAD_GLYPH_SHEET_W 144
+#define PAD_GLYPH_SHEET_H  64
+#define PAD_GLYPH_VRAM_X  832
+#define PAD_GLYPH_VRAM_Y    0
+#define PAD_GLYPH_CLUT_X  736
+#define PAD_GLYPH_CLUT_Y  256
+
 static TextureInfo catTex;
 static TextureInfo itemTex;
+static TextureInfo padGlyphTex;
 
 void initIcons(RenderContext *ctx) {
 	(void) ctx;
@@ -66,6 +81,45 @@ void initIcons(RenderContext *ctx) {
 		ITEM_VRAM_X, ITEM_VRAM_Y, ITEM_CLUT_X, ITEM_CLUT_Y,
 		ITEM_SHEET_W, ITEM_SHEET_H, GP0_COLOR_4BPP
 	);
+	uploadIndexedTexture(
+		&padGlyphTex, padGlyphTexture, padGlyphPalette,
+		PAD_GLYPH_VRAM_X, PAD_GLYPH_VRAM_Y,
+		PAD_GLYPH_CLUT_X, PAD_GLYPH_CLUT_Y,
+		PAD_GLYPH_SHEET_W, PAD_GLYPH_SHEET_H, GP0_COLOR_4BPP
+	);
+}
+
+/*
+ * Draw one pad glyph at its native 18x16 size.
+ *
+ * Always unblended and at a neutral 0x808080 vertex colour, so the artwork
+ * shows exactly as drawn - the pressed state is a different cell, not a
+ * colour change, which is why this needs no highlight box behind it.
+ */
+void drawPadGlyph(RenderContext *ctx, int index, int x, int y) {
+	if (index < 0 || index >= PAD_GLYPH_CELLS)
+		return;
+
+	GPUDMAChain *chain = getCurrentChain(ctx);
+
+	int cx = (index % PAD_GLYPH_COLS) * PAD_GLYPH_W;
+	int cy = (index / PAD_GLYPH_COLS) * PAD_GLYPH_H;
+	int u0 = padGlyphTex.u + cx,        v0 = padGlyphTex.v + cy;
+	int u1 = u0 + PAD_GLYPH_W - 1,      v1 = v0 + PAD_GLYPH_H - 1;
+
+	uint32_t *page = allocateGP0Packet(chain, 1);
+	page[0] = gp0_setPage(padGlyphTex.page, false, false);
+
+	uint32_t *ptr = allocateGP0Packet(chain, 9);
+	ptr[0] = 0x808080u | gp0_shadedQuad(false, true, false);
+	ptr[1] = gp0_xy(x, y);
+	ptr[2] = gp0_uv(u0, v0, padGlyphTex.clut);
+	ptr[3] = gp0_xy(x + PAD_GLYPH_W, y);
+	ptr[4] = gp0_uv(u1, v0, padGlyphTex.page);
+	ptr[5] = gp0_xy(x, y + PAD_GLYPH_H);
+	ptr[6] = gp0_uv(u0, v1, 0);
+	ptr[7] = gp0_xy(x + PAD_GLYPH_W, y + PAD_GLYPH_H);
+	ptr[8] = gp0_uv(u1, v1, 0);
 }
 
 /*

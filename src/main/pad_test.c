@@ -37,6 +37,7 @@
 #include "common/sio0.h"
 #include "main/defs.h"
 #include "main/font.h"
+#include "main/icon.h"
 #include "main/mainmenu.h"
 #include "main/xmb_bg.h"
 #include "main/pad_test.h"
@@ -229,76 +230,56 @@ static void buildComboString(uint16_t buttons, char *out, size_t outSize) {
 
 #define HALF_WIDTH 160
 
-static void drawButtonGlyph(
-	RenderContext *ctx,
-	int           x,
-	int           y,
-	int           boxSize,
-	bool          pressed,
-	const char    *glyph
-) {
-	if (pressed)
-		drawRect(ctx, x - 2, y - 2, boxSize, boxSize, HIGHLIGHT_COLOR, false);
+/*
+ * Every button on this screen is now drawn as a pad glyph with its own
+ * pressed artwork (drawPadButton below). The previous helpers here -
+ * drawButtonGlyph, which put a HIGHLIGHT_COLOR box behind a font glyph, and
+ * drawLabeledButton, which drew a box with a text label - are gone along
+ * with the boxes themselves.
+ */
 
-	printString(ctx, x, y, pressed ? 0x000000 : 0x808080, glyph);
+/*
+ * A pad glyph that swaps artwork when pressed.
+ *
+ * There is no highlight box behind it: the pressed state IS a different
+ * piece of art (the lit version of the same button), so a coloured backdrop
+ * would only fight with it. That also means these glyphs read correctly at
+ * a glance without needing a text label underneath.
+ */
+static void drawPadButton(
+	RenderContext *ctx, int x, int y, PadGlyph glyph, bool pressed
+) {
+	drawPadGlyph(ctx, glyph + (pressed ? PAD_GLYPH_PRESSED : 0), x, y);
 }
 
-static void drawLabeledButton(
-	RenderContext *ctx,
-	int           x,
-	int           y,
-	int           w,
-	bool          pressed,
-	const char    *label
-) {
-	drawRect(ctx, x, y, w, 12, pressed ? HIGHLIGHT_COLOR : 0x242424, false);
-	printString(ctx, x + 3, y + 2, pressed ? 0x000000 : 0x808080, label);
-}
-
-// D-pad: the real direction glyph, drawn rotated per direction via
-// printDpadDirection() (font.c/.h). Earlier attempts at a non-text shape
-// here (triangles, a rect+triangle "house" shape) didn't land and this
-// screen fell back to plain U/D/L/R letters - see the git history. What
-// was missing then was a proper way to rotate a single piece of art in
-// 90-degree steps; printDpadDirection() is that, added when the D-pad
-// glyph itself was added to the font, so this is worth revisiting now.
-//
-// The button box still highlights on press exactly as it does for
-// L1/L2/R1/R2/L3/R3 (drawLabeledButton's HIGHLIGHT_COLOR). The glyph
-// itself does not change colour when pressed - it always renders in its
-// own baked colour, the same rule every other button glyph in this font
-// follows - so the box highlight is what carries the pressed state.
-static void drawDpadDirectionButton(
-	RenderContext *ctx,
-	int           x,
-	int           y,
-	int           w,
-	bool          pressed,
-	DpadDirection direction
-) {
-	drawRect(ctx, x, y, w, 12, pressed ? HIGHLIGHT_COLOR : 0x242424, false);
-
-	// The source art is 6x8; Left/Right render it sideways, so the box
-	// occupied on screen is 8x6 for those two. Centre whichever applies.
-	bool sideways = (direction == DPAD_DIR_LEFT) || (direction == DPAD_DIR_RIGHT);
-	int  glyphW   = sideways ? 8 : 6;
-	int  glyphH   = sideways ? 6 : 8;
-
-	printDpadDirection(
-		ctx, x + (w - glyphW) / 2, y + (12 - glyphH) / 2, direction
-	);
-}
-
+/*
+ * D-pad cross, built from the four direction glyphs.
+ *
+ * These are four separate pieces of artwork rather than one rotated glyph.
+ * font.c still has printDpadDirection() for the rotated single-glyph version,
+ * which is what inline text like the XMB footer hint uses - but here each
+ * direction also needs a distinct pressed variant, so drawing them as four
+ * cells is both simpler and what the artwork provides.
+ *
+ * Spacing is 16px from centre: the glyph cells are 18x16, so this keeps the
+ * arms visually touching at the centre the way a real D-pad does.
+ */
 static void drawDpadIcon(
 	RenderContext *ctx,
 	int           centerX,
 	int           centerY,
 	uint16_t      buttons
 ) {
-	drawDpadDirectionButton(ctx, centerX,      centerY - 14, 14, buttons & PAD_BTN_UP,    DPAD_DIR_UP);
-	drawDpadDirectionButton(ctx, centerX,      centerY + 14, 14, buttons & PAD_BTN_DOWN,  DPAD_DIR_DOWN);
-	drawDpadDirectionButton(ctx, centerX - 14, centerY,      14, buttons & PAD_BTN_LEFT,  DPAD_DIR_LEFT);
-	drawDpadDirectionButton(ctx, centerX + 14, centerY,      14, buttons & PAD_BTN_RIGHT, DPAD_DIR_RIGHT);
+	int hw = PAD_GLYPH_W / 2, hh = PAD_GLYPH_H / 2;
+
+	drawPadButton(ctx, centerX - hw, centerY - hh - 14,
+		PAD_GLYPH_DPAD_UP,    buttons & PAD_BTN_UP);
+	drawPadButton(ctx, centerX - hw, centerY - hh + 14,
+		PAD_GLYPH_DPAD_DOWN,  buttons & PAD_BTN_DOWN);
+	drawPadButton(ctx, centerX - hw - 14, centerY - hh,
+		PAD_GLYPH_DPAD_LEFT,  buttons & PAD_BTN_LEFT);
+	drawPadButton(ctx, centerX - hw + 14, centerY - hh,
+		PAD_GLYPH_DPAD_RIGHT, buttons & PAD_BTN_RIGHT);
 }
 
 static void drawAnalogStick(
@@ -344,11 +325,12 @@ static void drawPad(RenderContext *ctx, int baseX, int port, const PadState *pad
 
 	printString(ctx, baseX + 60, 20, 0x505050, typeName);
 
-	// Shoulder buttons, top corners
-	drawLabeledButton(ctx, baseX +  4, 36, 24, pad->buttons & PAD_BTN_L1, "L1");
-	drawLabeledButton(ctx, baseX +  4, 50, 24, pad->buttons & PAD_BTN_L2, "L2");
-	drawLabeledButton(ctx, baseX + 132, 36, 24, pad->buttons & PAD_BTN_R1, "R1");
-	drawLabeledButton(ctx, baseX + 132, 50, 24, pad->buttons & PAD_BTN_R2, "R2");
+	// Shoulder buttons, top corners. The glyphs carry their own L1/L2/R1/R2
+	// lettering, so no text label is drawn alongside them.
+	drawPadButton(ctx, baseX +   4, 34, PAD_GLYPH_L1, pad->buttons & PAD_BTN_L1);
+	drawPadButton(ctx, baseX +   4, 52, PAD_GLYPH_L2, pad->buttons & PAD_BTN_L2);
+	drawPadButton(ctx, baseX + 130, 34, PAD_GLYPH_R1, pad->buttons & PAD_BTN_R1);
+	drawPadButton(ctx, baseX + 130, 52, PAD_GLYPH_R2, pad->buttons & PAD_BTN_R2);
 
 	// D-pad cross, left side
 	int dpadX = baseX + 36, dpadY = 90;
@@ -358,19 +340,29 @@ static void drawPad(RenderContext *ctx, int baseX, int port, const PadState *pad
 	// Face button diamond, right side
 	int faceX = baseX + 116, faceY = 86;
 
-	drawButtonGlyph(ctx, faceX,      faceY - 16, 14, pad->buttons & PAD_BTN_TRIANGLE, CH_PS1_TRIANGLE_BUTTON);
-	drawButtonGlyph(ctx, faceX + 16, faceY,      14, pad->buttons & PAD_BTN_CIRCLE,   CH_PS1_CIRCLE_BUTTON);
-	drawButtonGlyph(ctx, faceX,      faceY + 16, 14, pad->buttons & PAD_BTN_CROSS,    CH_PS1_CROSS_BUTTON);
-	drawButtonGlyph(ctx, faceX - 16, faceY,      14, pad->buttons & PAD_BTN_SQUARE,   CH_PS1_SQUARE_BUTTON);
+	{
+		int hw = PAD_GLYPH_W / 2, hh = PAD_GLYPH_H / 2;
+
+		drawPadButton(ctx, faceX - hw,      faceY - hh - 16,
+			PAD_GLYPH_TRIANGLE, pad->buttons & PAD_BTN_TRIANGLE);
+		drawPadButton(ctx, faceX - hw + 16, faceY - hh,
+			PAD_GLYPH_CIRCLE,   pad->buttons & PAD_BTN_CIRCLE);
+		drawPadButton(ctx, faceX - hw,      faceY - hh + 16,
+			PAD_GLYPH_CROSS,    pad->buttons & PAD_BTN_CROSS);
+		drawPadButton(ctx, faceX - hw - 16, faceY - hh,
+			PAD_GLYPH_SQUARE,   pad->buttons & PAD_BTN_SQUARE);
+	}
 
 	// Select/Start, bottom center
-	drawButtonGlyph(ctx, baseX + 60, 119, 20, pad->buttons & PAD_BTN_SELECT, CH_PS1_SELECT_BUTTON);
-	drawButtonGlyph(ctx, baseX + 90, 119, 20, pad->buttons & PAD_BTN_START,  CH_PS1_START_BUTTON);
+	drawPadButton(ctx, baseX + 58, 116, PAD_GLYPH_SELECT, pad->buttons & PAD_BTN_SELECT);
+	drawPadButton(ctx, baseX + 86, 116, PAD_GLYPH_START,  pad->buttons & PAD_BTN_START);
 
 	// L3/R3 (stick clicks), only meaningful on analog pads but harmless to
 	// show regardless
-	drawLabeledButton(ctx, baseX + 20,  142, 24, pad->buttons & PAD_BTN_L3, "L3");
-	drawLabeledButton(ctx, baseX + 116, 142, 24, pad->buttons & PAD_BTN_R3, "R3");
+	// The stick glyph doubles as the L3/R3 indicator - one piece of art for
+	// both, since a stick click has no separate icon on a real pad either.
+	drawPadButton(ctx, baseX + 31,  140, PAD_GLYPH_STICK, pad->buttons & PAD_BTN_L3);
+	drawPadButton(ctx, baseX + 111, 140, PAD_GLYPH_STICK, pad->buttons & PAD_BTN_R3);
 
 	// Analog sticks
 	drawAnalogStick(ctx, baseX + 40,  174, pad->leftX,  pad->leftY,  isAnalog);
