@@ -60,13 +60,21 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
  * See icon.c's PAD_GLYPH_VRAM_X note before reusing anything in 832..960 -
  * the planet textures live there for the full height of VRAM.
  */
+/*
+ * Widths are all multiples of 4.
+ *
+ * uploadIndexedTexture() uploads width/4 VRAM columns at 4bpp, so a width
+ * that is not a multiple of 4 loses its last column of pixels - silently,
+ * with no warning. The source PNGs are padded with transparent pixels to
+ * suit; the padding is invisible because it is fully transparent.
+ */
 #define SONY_W 160
 #define SONY_H  28
-#define SCET_W 122
+#define SCET_W 124
 #define SCET_H  24
-#define PSLG_W  90
+#define PSLG_W  92
 #define PSLG_H  82
-#define PSTX_W  73
+#define PSTX_W  76
 #define PSTX_H  16
 
 #define INTRO_VRAM_X 960
@@ -198,6 +206,8 @@ static void spriteFadeOnLight(
 void initPS1Boot(RenderContext *ctx) {
 	(void) ctx;
 
+#if PS1_BOOT_TEXTURES
+
 	uploadIndexedTexture(&sonyTex, introSonyTexture, introSonyPalette,
 		INTRO_VRAM_X, SONY_VRAM_Y, SONY_CLUT_X, INTRO_CLUT_Y,
 		SONY_W, SONY_H, GP0_COLOR_4BPP);
@@ -213,6 +223,7 @@ void initPS1Boot(RenderContext *ctx) {
 	uploadIndexedTexture(&psTextTex, introPsTextTexture, introPsTextPalette,
 		INTRO_VRAM_X, PSTX_VRAM_Y, PSTX_CLUT_X, INTRO_CLUT_Y,
 		PSTX_W, PSTX_H, GP0_COLOR_4BPP);
+#endif
 }
 
 /* --- the SCE (white) screen ------------------------------------------- */
@@ -294,12 +305,14 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 		textLevel = 256 - ramp(frame, T_SCE_OUT, T_SCE_OUT_END) ;
 
 	if (textLevel > 0) {
+#if PS1_BOOT_TEXTURES
 		spriteFadeOnLight(ctx, &sonyTex,
 			SQ_X + (SQ - SONY_W) / 2, PCT_Y(5), SONY_W, SONY_H, textLevel);
 
 		spriteFadeOnLight(ctx, &sceTextTex,
 			SQ_X + (SQ - SCET_W) / 2, PCT_Y(94) - SCET_H,
 			SCET_W, SCET_H, textLevel);
+#endif
 
 		// The trademark mark, drawn in the dashboard's own font: it is two
 		// characters at 3vmin and rasterising an asset for it would cost
@@ -326,19 +339,23 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 	// Bright artwork on black: scaling the vertex colour gives a genuinely
 	// smooth fade, because the GPU modulates every texel by it.
 	if (logoLevel > 0) {
+#if PS1_BOOT_TEXTURES
 		uint32_t g = (uint32_t) clampi((logoLevel * 128) / 256, 0, 128);
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psLogoTex,
 			SQ_X + (SQ - PSLG_W) / 2, PCT_Y(16), PSLG_W, PSLG_H, tint, false);
+#endif
 	}
 
 	if (textLevel > 0) {
+#if PS1_BOOT_TEXTURES
 		uint32_t g = (uint32_t) clampi((textLevel * 128) / 256, 0, 128);
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psTextTex,
 			SQ_X + (SQ - PSTX_W) / 2, PCT_Y(47), PSTX_W, PSTX_H, tint, false);
+#endif
 	}
 
 	if (creditsLevel > 0) {
@@ -359,8 +376,27 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 }
 
 void runPS1Boot(RenderContext *ctx) {
+	/*
+	 * Skip handling is deliberately defensive.
+	 *
+	 * The first version broke out of the loop the moment any button bit was
+	 * set, then span in an unbounded "wait for release" afterwards. A pad
+	 * reporting a stuck bit - or a multitap, or an emulator mapping - would
+	 * therefore skip the whole sequence on frame 0 and then hang forever
+	 * waiting for a release that never comes: a black screen with the music
+	 * still playing, which is exactly what that looks like.
+	 *
+	 * Now a skip has to be a genuine press: the pad must read clear first,
+	 * and every wait is bounded.
+	 */
+	bool sawRelease = false;
+
 	for (int frame = 0; frame < T_END; frame++) {
-		if (pollController(0) | pollController(1))
+		uint16_t buttons = pollController(0) | pollController(1);
+
+		if (!buttons)
+			sawRelease = true;
+		else if (sawRelease)
 			break;
 
 		beginFrame(ctx);
@@ -384,7 +420,15 @@ void runPS1Boot(RenderContext *ctx) {
 		endFrame(ctx);
 	}
 
-	// Do not pass a held button straight to the menu.
-	while (pollController(0) | pollController(1))
-		;
+	// Do not pass a held button straight to the menu - but never wait
+	// indefinitely for that, for the reason above.
+	for (int guard = 0; guard < 120; guard++) {
+		if (!(pollController(0) | pollController(1)))
+			break;
+
+		beginFrame(ctx);
+		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
+			0x000000, false);
+		endFrame(ctx);
+	}
 }
