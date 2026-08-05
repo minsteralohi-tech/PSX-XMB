@@ -65,6 +65,14 @@ extern const char *const xmbThemeNames[XMB_THEME_COUNT];
 extern uint8_t           xmbThemeIndex; // 0 .. XMB_THEME_COUNT - 1
 
 /*
+ * Index of "Gouraud Waves + Sparkle" in xmbThemeNames[]. Named because the
+ * boot intro forces this specific theme regardless of the user's choice, and
+ * a bare 1 there would silently point at the wrong theme if the list is ever
+ * reordered.
+ */
+#define XMB_THEME_GOURAUD_SPARKLE 1
+
+/*
  * Colour palettes for the PSP-derived wave themes. Selecting one recolours
  * the background gradient, both wave layers and the sparkles together, so the
  * whole scene stays harmonised rather than just tinting one element.
@@ -127,6 +135,14 @@ XMBBgStyle xmbBgGetStyle(void);
 void drawFlatBackdrop(RenderContext *ctx, uint32_t color);
 
 void drawXMBBackground(RenderContext *ctx);
+
+/*
+ * Advance the wave animation clock by extra frames, on top of the one frame
+ * drawXMBBackground() already adds. Used by the boot intro to speed the
+ * waves up; every wave layer is a function of that clock, so this is all the
+ * acceleration effect needs.
+ */
+void xmbAdvanceFrames(uint32_t extra);
 
 // Uploads the Nebula 2 hero planet's surface texture into VRAM. Call once at
 // boot, alongside initIcons() - see xmb_bg.c for the VRAM placement.

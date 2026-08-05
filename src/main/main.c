@@ -24,6 +24,7 @@
 #include "main/icon.h"
 #include "main/fastboot.h"
 #include "main/gameid.h"
+#include "main/intro.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
 #include "main/sound.h"
@@ -86,6 +87,14 @@ int main(int argc, const char **argv) {
 	initNebulaTexture(&ctx);
 	initXMB();
 	initSystemHUD();
+
+#if INTRO_ENABLED
+	// Boot animation, once per launch. Placed after every init above -
+	// it draws through the normal renderer and uses the wave theme's
+	// textures - and before the menu is entered.
+	runBootIntro(&ctx);
+#endif
+
 	enterMainMenu(&ctx, &state, 0);
 
 #if GAMEID_ENABLED

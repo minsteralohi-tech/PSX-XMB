@@ -2876,6 +2876,18 @@ void drawFlatBackdrop(RenderContext *ctx, uint32_t color) {
 		false);
 }
 
+/*
+ * Push the wave animation forward by more than the usual one frame.
+ *
+ * drawXMBBackground() advances xmbFrame by 1 per call, which is the normal
+ * idle drift. The boot intro uses this to accelerate the waves without
+ * touching the wave code itself: the layers are all functions of xmbFrame,
+ * so making time pass faster is the whole effect.
+ */
+void xmbAdvanceFrames(uint32_t extra) {
+	xmbFrame += extra;
+}
+
 void drawXMBBackground(RenderContext *ctx) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
