@@ -122,8 +122,15 @@ addBinaryFile("${RELEASE_NAME}" catTexture "${PROJECT_BINARY_DIR}/assets/catText
 addBinaryFile("${RELEASE_NAME}" catPalette "${PROJECT_BINARY_DIR}/assets/catPalette.dat")
 
 convertImage(assets/icons_item.png 4 assets/itemTexture.dat assets/itemPalette.dat)
+convertImage(assets/padglyphs.png 4 assets/padGlyphTexture.dat assets/padGlyphPalette.dat)
 addBinaryFile("${RELEASE_NAME}" itemTexture "${PROJECT_BINARY_DIR}/assets/itemTexture.dat")
 addBinaryFile("${RELEASE_NAME}" itemPalette "${PROJECT_BINARY_DIR}/assets/itemPalette.dat")
+
+# Pad tester button glyphs: one sheet holding both the unpressed and pressed
+# artwork for every button, so the tester shows a real pressed glyph instead
+# of a highlight box behind a label.
+addBinaryFile("${RELEASE_NAME}" padGlyphTexture "${PROJECT_BINARY_DIR}/assets/padGlyphTexture.dat")
+addBinaryFile("${RELEASE_NAME}" padGlyphPalette "${PROJECT_BINARY_DIR}/assets/padGlyphPalette.dat")
 
 # Sun/lava surface texture for the Nebula 2 theme's hero planet (8bpp: a
 # photographic gradient texture needs more than 16 colours to avoid banding).
