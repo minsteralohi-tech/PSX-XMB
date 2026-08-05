@@ -53,6 +53,15 @@ extern const uint8_t spuTestSound[];
  * navigation theme the user picks. */
 extern const uint8_t notifySound[];
 
+/*
+ * The PS1 boot jingle. Deliberately NOT given SPU RAM of its own: at ~99 KB
+ * it would not fit alongside the BGM slot, the nine SFX and the test tone in
+ * 512 KB. Instead it borrows the BGM slot, which is already sized for the
+ * largest music track (~340 KB) and is not needed during the boot sequence.
+ * restoreBGMAfterIntro() puts the real track back afterwards.
+ */
+extern const uint8_t introJingleSound[];
+
 // The BGM tracks (ps3xmb.vag / ps4xmb.vag), embedded via addBinaryFile().
 // Downsampled to 11025 Hz rather than 44.1 kHz - PS-ADPCM size scales directly
 // with sample rate, and at full quality these would need close to 2 MB on
@@ -245,6 +254,46 @@ void playNotifySound(void) {
 	// channel would mean re-checking the SPU channel budget everywhere.
 	if (sfxEnabled)
 		playSample(notifySound, notifySoundOffset, CANCEL_CHANNEL);
+}
+
+/*
+ * Play the boot jingle through the BGM slot and channel. Overwrites whatever
+ * music was uploaded there, so restoreBGMAfterIntro() must follow.
+ */
+void playIntroJingle(void) {
+	uploadVAG(introJingleSound, bgmSoundOffset);
+
+	const VAGHeader *header = (const VAGHeader *) introJingleSound;
+	uint32_t sampleRate = swapEndian(header->sampleRate);
+	uint32_t pitch      = (sampleRate << 12) / 44100;
+
+	SPU_KOFF0 = 1 << BGM_CHANNEL;
+
+	SPU_CH_VOLL (BGM_CHANNEL) = BGM_VOLUME;
+	SPU_CH_VOLR (BGM_CHANNEL) = BGM_VOLUME;
+	SPU_CH_PITCH(BGM_CHANNEL) = pitch;
+	SPU_CH_SSA  (BGM_CHANNEL) = bgmSoundOffset / SPU_RAM_ADDR_UNIT;
+	// No loop: the jingle plays once. LSAX still has to point somewhere
+	// valid, so it points at the sample itself.
+	SPU_CH_LSAX (BGM_CHANNEL) = bgmSoundOffset / SPU_RAM_ADDR_UNIT;
+	SPU_CH_ADSR1(BGM_CHANNEL) = 0x00ff;
+	SPU_CH_ADSR2(BGM_CHANNEL) = 0x0000;
+
+	SPU_KON0 = 1 << BGM_CHANNEL;
+}
+
+/* Re-upload the selected music track over the jingle and start it. */
+void restoreBGMAfterIntro(void) {
+	SPU_KOFF0 = 1 << BGM_CHANNEL;
+
+	if (!currentBGMData)
+		currentBGMData = bgmTable[currentBGM];
+
+	if (!currentBGMData)
+		return;
+
+	uploadVAG(currentBGMData, bgmSoundOffset);
+	playBGM();
 }
 
 void playTestTone(int channel) {

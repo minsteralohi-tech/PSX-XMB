@@ -49,6 +49,13 @@ void playBGM(void);
  * user's chosen SFX set, but still muted by the SFX toggle. */
 void playNotifySound(void);
 
+/*
+ * Boot jingle. Borrows the BGM slot (see the note in sound.c), so
+ * restoreBGMAfterIntro() must be called once the boot sequence ends.
+ */
+void playIntroJingle(void);
+void restoreBGMAfterIntro(void);
+
 void playTestTone(int channel);
 
 // Toggles background music on/off (mutes/restores its volume - doesn't

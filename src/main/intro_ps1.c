@@ -44,6 +44,7 @@
 #include "main/font.h"
 #include "main/intro_ps1.h"
 #include "main/renderer.h"
+#include "main/sound.h"
 
 extern const uint8_t introSonyTexture[],   introSonyPalette[];
 extern const uint8_t introSceTextTexture[], introSceTextPalette[];
@@ -61,27 +62,50 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
  * the planet textures live there for the full height of VRAM.
  */
 /*
- * Widths are all multiples of 4.
+ * Dimensions are padded, and BOTH constraints matter.
  *
- * uploadIndexedTexture() uploads width/4 VRAM columns at 4bpp, so a width
- * that is not a multiple of 4 loses its last column of pixels - silently,
- * with no warning. The source PNGs are padded with transparent pixels to
- * suit; the padding is invisible because it is fully transparent.
+ * 1. Width must be a multiple of 4. uploadIndexedTexture() uploads width/4
+ *    VRAM columns at 4bpp, so anything else silently loses a column.
+ *
+ * 2. (width/4 * height / 2) must be a whole number of 16-word DMA chunks.
+ *    sendVRAMData() computes numChunks = length / 16 and DROPS the
+ *    remainder - it only asserts, and asserts are compiled out in release.
+ *    A short transfer leaves the GPU parked in the middle of its
+ *    vramWrite command, waiting for pixels that never arrive, so every GP0
+ *    command after it is swallowed as texture data and the screen stays
+ *    black with the music still playing. That was this sequence's original
+ *    black-screen bug, and three of these four textures had it.
+ *
+ * Padding width to a multiple of 16 and height to a multiple of 8 satisfies
+ * both at once. The padding is fully transparent, so nothing is drawn.
+ *
+ * DRAW sizes are separate: the sprites below draw only the real artwork
+ * area, not the padding.
  */
-#define SONY_W 160
-#define SONY_H  28
-#define SCET_W 124
+#define SONY_W 160   /* padded; artwork is 160x28 */
+#define SONY_H  32
+#define SCET_W 128   /* padded; artwork is 122x24 */
 #define SCET_H  24
-#define PSLG_W  92
-#define PSLG_H  82
-#define PSTX_W  76
+#define PSLG_W  96   /* padded; artwork is 90x82  */
+#define PSLG_H  88
+#define PSTX_W  80   /* padded; artwork is 73x16  */
 #define PSTX_H  16
+
+/* Visible artwork inside each padded texture. */
+#define SONY_DW 160
+#define SONY_DH  28
+#define SCET_DW 122
+#define SCET_DH  24
+#define PSLG_DW  90
+#define PSLG_DH  82
+#define PSTX_DW  73
+#define PSTX_DH  16
 
 #define INTRO_VRAM_X 960
 #define SONY_VRAM_Y   64
 #define SCET_VRAM_Y   96
 #define PSLG_VRAM_Y  128
-#define PSTX_VRAM_Y  216
+#define PSTX_VRAM_Y  224
 
 #define SONY_CLUT_X 752
 #define SCET_CLUT_X 768
@@ -307,11 +331,11 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	if (textLevel > 0) {
 #if PS1_BOOT_TEXTURES
 		spriteFadeOnLight(ctx, &sonyTex,
-			SQ_X + (SQ - SONY_W) / 2, PCT_Y(5), SONY_W, SONY_H, textLevel);
+			SQ_X + (SQ - SONY_DW) / 2, PCT_Y(5), SONY_DW, SONY_DH, textLevel);
 
 		spriteFadeOnLight(ctx, &sceTextTex,
-			SQ_X + (SQ - SCET_W) / 2, PCT_Y(94) - SCET_H,
-			SCET_W, SCET_H, textLevel);
+			SQ_X + (SQ - SCET_DW) / 2, PCT_Y(94) - SCET_DH,
+			SCET_DW, SCET_DH, textLevel);
 #endif
 
 		// The trademark mark, drawn in the dashboard's own font: it is two
@@ -344,7 +368,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psLogoTex,
-			SQ_X + (SQ - PSLG_W) / 2, PCT_Y(16), PSLG_W, PSLG_H, tint, false);
+			SQ_X + (SQ - PSLG_DW) / 2, PCT_Y(16), PSLG_DW, PSLG_DH, tint, false);
 #endif
 	}
 
@@ -354,7 +378,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psTextTex,
-			SQ_X + (SQ - PSTX_W) / 2, PCT_Y(47), PSTX_W, PSTX_H, tint, false);
+			SQ_X + (SQ - PSTX_DW) / 2, PCT_Y(47), PSTX_DW, PSTX_DH, tint, false);
 #endif
 	}
 
@@ -391,6 +415,11 @@ void runPS1Boot(RenderContext *ctx) {
 	 */
 	bool sawRelease = false;
 
+	// The jingle runs the length of the sequence and borrows the BGM slot,
+	// so the music has to be restored on every exit path below - including
+	// a skip.
+	playIntroJingle();
+
 	for (int frame = 0; frame < T_END; frame++) {
 		uint16_t buttons = pollController(0) | pollController(1);
 
@@ -419,6 +448,8 @@ void runPS1Boot(RenderContext *ctx) {
 
 		endFrame(ctx);
 	}
+
+	restoreBGMAfterIntro();
 
 	// Do not pass a held button straight to the menu - but never wait
 	// indefinitely for that, for the reason above.

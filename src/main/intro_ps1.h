@@ -16,16 +16,13 @@ extern "C" {
 #endif
 
 /*
- * DISABLED BY DEFAULT.
+ * The black screen this used to give was a truncated DMA upload: three of
+ * the four textures had dimensions whose transfer length was not a whole
+ * number of 16-word chunks, so sendVRAMData() sent short and left the GPU
+ * parked mid-vramWrite forever. See the note on the size constants in
+ * intro_ps1.c. Fixed by padding the artwork.
  *
- * The first hardware test of this sequence gave a black screen with the music
- * still playing, and I could not isolate the cause by inspection - the parts
- * I could check statically (VRAM slots, CLUT addresses, packet word counts,
- * texture page bases, display enable order, the controller skip logic) all
- * verify correct. A dashboard that does not boot is worse than one without an
- * intro, so this ships off.
- *
- * TO BISECT IT, in this order:
+ * THE BISECT SWITCH BELOW IS KEPT, since it is what found that:
  *
  *   1. Set PS1_BOOT_ENABLED to 1, leave PS1_BOOT_TEXTURES at 0.
  *      That runs the sequence using ONLY flat polygons - the white screen,
