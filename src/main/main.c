@@ -25,6 +25,7 @@
 #include "main/fastboot.h"
 #include "main/gameid.h"
 #include "main/intro.h"
+#include "main/intro_ps1.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
 #include "main/sound.h"
@@ -88,10 +89,14 @@ int main(int argc, const char **argv) {
 	initXMB();
 	initSystemHUD();
 
-#if INTRO_ENABLED
-	// Boot animation, once per launch. Placed after every init above -
-	// it draws through the normal renderer and uses the wave theme's
-	// textures - and before the menu is entered.
+#if PS1_BOOT_ENABLED
+	// The PlayStation boot sequence, once per launch. Its textures are
+	// uploaded here rather than in initIcons() so they are only in VRAM
+	// while the sequence needs them.
+	initPS1Boot(&ctx);
+	runPS1Boot(&ctx);
+	reloadTextures(&ctx);
+#elif INTRO_ENABLED
 	runBootIntro(&ctx);
 #endif
 
