@@ -293,33 +293,61 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	}
 
 	/*
-	 * The two triangles. In the source they start as 25%x50% boxes sitting
-	 * either side of centre and animate to 10%x20% while moving inward, so
-	 * they read as the diamond's highlight splitting and converging.
+	 * The two triangles.
+	 *
+	 * The first version of this had them meeting at the centre and forming
+	 * a second diamond, which is not what the real mark does at all. Read
+	 * off the source properly this time:
+	 *
+	 *   Both start as 25%x50% boxes covering the diamond's bounding box -
+	 *   triangle 1 the left half, triangle 2 the right - and shrink to
+	 *   10%x20% while moving to fixed end positions taken straight from
+	 *   startup.js:
+	 *
+	 *     t1  left 50%-9%  = 41%      top 50%-19% = 31%
+	 *     t2  left 50%-1%  = 49%      top 50%-1%  = 49%
+	 *
+	 *   Triangle 1 is clip-path polygon(0% 50%, 100% 100%, 100% 0): a point
+	 *   on the LEFT with a full-height edge on the right. Triangle 2 is the
+	 *   mirror, pointing RIGHT. They end up offset from each other - one
+	 *   above centre, one below - which is what cuts the two notches into
+	 *   the diamond that make the SCE mark, rather than filling it in.
+	 *
+	 * All coordinates are percentages of the reference square, because the
+	 * triangles are positioned against the container, not the diamond.
 	 */
 	if (frame >= T_TRI_START) {
 		int k = ramp(frame, T_TRI_START, T_TRI_END);
 
-		int wStart = (SQ * 25) / 100, wEnd = (SQ * 10) / 100;
-		int hStart = (SQ * 50) / 100, hEnd = (SQ * 20) / 100;
+		/* Sizes: 25%x50% -> 10%x20% of the square. */
+		int w = ((25 + ((10 - 25) * k) / 256) * SQ) / 100;
+		int h = ((50 + ((20 - 50) * k) / 256) * SQ) / 100;
 
-		int w = wStart + ((wEnd - wStart) * k) / 256;
-		int h = hStart + ((hEnd - hStart) * k) / 256;
+		/* Top-left corners, in percent * 100 to keep the interpolation
+		 * honest with integer maths. */
+		int t1x = ((2500 + ((4100 - 2500) * k) / 256) * SQ) / 10000;
+		int t1y = ((2500 + ((3100 - 2500) * k) / 256) * SQ) / 10000;
+		int t2x = ((5000 + ((4900 - 5000) * k) / 256) * SQ) / 10000;
+		int t2y = ((2500 + ((4900 - 2500) * k) / 256) * SQ) / 10000;
 
-		// Left triangle: clip-path polygon(0% 50%, 100% 100%, 100% 0) - a
-		// point on the left, flat edge on the right.
+		t1x += SQ_X; t2x += SQ_X;
+		t1y += SQ_Y; t2y += SQ_Y;
+
+		// Triangle 1: apex on the left (red), full-height edge on the
+		// right (amber). Fourth vertex repeats the third so the quad
+		// degenerates into a triangle.
 		gouraudQuad(ctx,
-			cx - w, cy,         edge,
-			cx,     cy - h / 2, centre,
-			cx,     cy + h / 2, centre,
-			cx,     cy,         centre);
+			t1x,     t1y + h / 2, edge,
+			t1x + w, t1y,         centre,
+			t1x + w, t1y + h,     centre,
+			t1x + w, t1y + h,     centre);
 
-		// Right triangle: mirrored.
+		// Triangle 2: mirrored - apex on the right, edge on the left.
 		gouraudQuad(ctx,
-			cx,     cy - h / 2, centre,
-			cx + w, cy,         edge,
-			cx,     cy,         centre,
-			cx,     cy + h / 2, centre);
+			t2x + w, t2y + h / 2, edge,
+			t2x,     t2y,         centre,
+			t2x,     t2y + h,     centre,
+			t2x,     t2y + h,     centre);
 	}
 
 	/* SONY wordmark and the COMPUTER / ENTERTAINMENT block. */
