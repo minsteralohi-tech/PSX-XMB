@@ -93,6 +93,9 @@ int main(int argc, const char **argv) {
 	// The PlayStation boot sequence, once per launch. Its textures are
 	// uploaded here rather than in initIcons() so they are only in VRAM
 	// while the sequence needs them.
+#if PS1_BOOT_SHOW_MENU
+	setPS1IntroVariant(chooseIntroVariant(&ctx));
+#endif
 	initPS1Boot(&ctx);
 	runPS1Boot(&ctx);
 	reloadTextures(&ctx);

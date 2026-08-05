@@ -41,10 +41,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "common/sio0.h"
+#include "main/defs.h"
 #include "main/font.h"
 #include "main/intro_ps1.h"
 #include "main/renderer.h"
 #include "main/sound.h"
+#include "main/trig.h"
 
 extern const uint8_t introSonyTexture[],   introSonyPalette[];
 extern const uint8_t introSceTextTexture[], introSceTextPalette[];
@@ -114,6 +116,9 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 #define INTRO_CLUT_Y 256
 
 static TextureInfo sonyTex, sceTextTex, psLogoTex, psTextTex;
+
+/* Which look to use, chosen from the boot menu. See PS1IntroVariant. */
+static int introVariant = PS1_INTRO_CLASSIC;
 
 /* --- timeline, in frames --------------------------------------------- */
 #define T_DIAMOND_IN     0
@@ -227,6 +232,248 @@ static void spriteFadeOnLight(
 		sprite(ctx, tex, x, y, w, h, 0x808080, i < 3);
 }
 
+/* ===================================================================== *
+ * Variant support
+ *
+ * Three looks for the SCE screen, chosen from a menu at boot so they can be
+ * compared on real hardware in a single build. All three share the timeline,
+ * the wordmarks and the PlayStation screen - only the diamond changes.
+ * ===================================================================== */
+
+/* Scale a 0xBBGGRR colour by n/256, clamped. */
+static uint32_t scaleCol(uint32_t c, int n) {
+	uint32_t r = ((c        & 0xff) * n) >> 8;
+	uint32_t g = (((c >> 8)  & 0xff) * n) >> 8;
+	uint32_t b = (((c >> 16) & 0xff) * n) >> 8;
+
+	if (r > 0xff) r = 0xff;
+	if (g > 0xff) g = 0xff;
+	if (b > 0xff) b = 0xff;
+
+	return (b << 16) | (g << 8) | r;
+}
+
+/* Blended flat quad, for the glass body and the glow rings. */
+static void glassQuad(
+	RenderContext *ctx,
+	int x0, int y0, int x1, int y1,
+	int x2, int y2, int x3, int y3,
+	uint32_t colour
+) {
+	GPUDMAChain *chain = getCurrentChain(ctx);
+	uint32_t *ptr = allocateGP0Packet(chain, 5);
+
+	ptr[0] = colour | gp0_shadedQuad(false, false, true);
+	ptr[1] = gp0_xy(x0, y0);
+	ptr[2] = gp0_xy(x1, y1);
+	ptr[3] = gp0_xy(x2, y2);
+	ptr[4] = gp0_xy(x3, y3);
+}
+
+/*
+ * Sparks bouncing inside the diamond.
+ *
+ * A point is inside a rhombus when |dx|/rx + |dy|/ry <= 1, which is the
+ * cheapest containment test available - no square roots, no trig. On a hit
+ * the velocity component with the larger contribution is flipped, which is a
+ * good enough approximation of reflecting off a slanted wall at this size
+ * and costs nothing.
+ */
+#define SPARK_COUNT 14
+
+typedef struct {
+	int x, y, vx, vy;
+} Spark;
+
+static Spark sparks[SPARK_COUNT];
+static bool  sparksReady;
+
+static void resetSparks(int r) {
+	for (int i = 0; i < SPARK_COUNT; i++) {
+		/* Deterministic spread - no RNG needed and it looks the same on
+		 * every boot, which makes comparing the variants easier. */
+		sparks[i].x  = ((i * 37) % (r)) - r / 2;
+		sparks[i].y  = ((i * 53) % (r)) - r / 2;
+		sparks[i].vx = ((i % 5) - 2) * 2 + 1;
+		sparks[i].vy = ((i % 7) - 3) * 2 + 1;
+	}
+
+	sparksReady = true;
+}
+
+static void drawSparks(RenderContext *ctx, int cx, int cy, int r, int level) {
+	if (!sparksReady)
+		resetSparks(r);
+
+	for (int i = 0; i < SPARK_COUNT; i++) {
+		Spark *s = &sparks[i];
+
+		s->x += s->vx;
+		s->y += s->vy;
+
+		int ax = s->x < 0 ? -s->x : s->x;
+		int ay = s->y < 0 ? -s->y : s->y;
+
+		/* Outside the rhombus? Flip whichever axis is pushing hardest. */
+		if (ax + ay > r - 4) {
+			if (ax > ay)
+				s->vx = -s->vx;
+			else
+				s->vy = -s->vy;
+
+			s->x += s->vx;
+			s->y += s->vy;
+		}
+
+		uint32_t c = scaleCol(0x80c0ff, level);   /* warm white */
+
+		drawRect(ctx, cx + s->x, cy + s->y, 2, 2, c, true);
+	}
+}
+
+/* ---- variant 2: a 3D diamond (octahedron) --------------------------- */
+
+#define OCTA_FACES 8
+
+static const int octaFace[OCTA_FACES][3] = {
+	{0, 2, 4}, {0, 4, 3}, {0, 3, 5}, {0, 5, 2},
+	{1, 4, 2}, {1, 3, 4}, {1, 5, 3}, {1, 2, 5},
+};
+
+/*
+ * Draw the diamond as a rotating octahedron.
+ *
+ * Six vertices on the axes, eight triangular faces, painter-sorted by
+ * average depth. Projection is the same simple perspective the rest of this
+ * project uses - divide by z - rather than the GTE, because this runs a
+ * handful of vertices per frame and setting up the coprocessor's matrices
+ * would cost more code than it saves.
+ */
+static void drawOctahedron(
+	RenderContext *ctx, int cx, int cy, int r,
+	int yaw, int pitch, int zOffset, int level
+) {
+	int vx[6], vy[6], vz[6];
+
+	const int base[6][3] = {
+		{ 0,  1,  0}, { 0, -1,  0},
+		{ 1,  0,  0}, {-1,  0,  0},
+		{ 0,  0,  1}, { 0,  0, -1},
+	};
+
+	int sy = isin(yaw),   cyw = icos(yaw);
+	int sp = isin(pitch), cp  = icos(pitch);
+
+	for (int i = 0; i < 6; i++) {
+		int x = base[i][0] * r;
+		int y = base[i][1] * r;
+		int z = base[i][2] * r;
+
+		/* Yaw about Y, then pitch about X. */
+		int x1 = (x * cyw + z * sy) >> ISIN_SHIFT;
+		int z1 = (z * cyw - x * sy) >> ISIN_SHIFT;
+		int y1 = (y * cp - z1 * sp) >> ISIN_SHIFT;
+		int z2 = (z1 * cp + y * sp) >> ISIN_SHIFT;
+
+		int depth = z2 + zOffset;
+
+		if (depth < 32)
+			depth = 32;
+
+		vx[i] = cx + (x1 * 220) / depth;
+		vy[i] = cy + (y1 * 220) / depth;
+		vz[i] = depth;
+	}
+
+	/* Painter's algorithm: draw the far faces first. */
+	int order[OCTA_FACES];
+	int key[OCTA_FACES];
+
+	for (int f = 0; f < OCTA_FACES; f++) {
+		order[f] = f;
+		key[f] = (vz[octaFace[f][0]] + vz[octaFace[f][1]]
+		        + vz[octaFace[f][2]]) / 3;
+	}
+
+	for (int a = 0; a < OCTA_FACES - 1; a++) {
+		for (int b = a + 1; b < OCTA_FACES; b++) {
+			if (key[order[b]] > key[order[a]]) {
+				int tmp = order[a];
+				order[a] = order[b];
+				order[b] = tmp;
+			}
+		}
+	}
+
+	for (int i = 0; i < OCTA_FACES; i++) {
+		int f = order[i];
+		const int *fv = octaFace[f];
+
+		/* Shade by face index so adjacent faces separate, then by the
+		 * fade level. Alternating warm tones keep it reading as the same
+		 * orange mark rather than a grey solid. */
+		uint32_t base_c = (f & 1) ? 0x0517e0 : 0x0093df;
+		uint32_t c = scaleCol(base_c, level);
+
+		GPUDMAChain *chain = getCurrentChain(ctx);
+		uint32_t *ptr = allocateGP0Packet(chain, 5);
+
+		ptr[0] = c | gp0_shadedQuad(false, false, false);
+		ptr[1] = gp0_xy(vx[fv[0]], vy[fv[0]]);
+		ptr[2] = gp0_xy(vx[fv[1]], vy[fv[1]]);
+		ptr[3] = gp0_xy(vx[fv[2]], vy[fv[2]]);
+		ptr[4] = gp0_xy(vx[fv[2]], vy[fv[2]]);
+	}
+}
+
+/* ---- variant 3: white Gouraud wave field ---------------------------- */
+
+/*
+ * The menu's wave theme, drawn in white instead of blue.
+ *
+ * Not a call into xmb_bg.c: that renderer's colours come from the theme
+ * palette and there is no white entry, so recolouring it would mean adding a
+ * palette nobody can select. Three sine bands with a vertical falloff is the
+ * same shape of effect and stays local to the intro.
+ */
+static void drawWhiteWaves(RenderContext *ctx, int frame) {
+	static const struct { int baseY, amp, freq, speed, height, shade; } layers[] = {
+		{ 118, 14, 26, 6, 46, 232 },
+		{ 132, 18, 34, 9, 38, 214 },
+		{ 126, 11, 20, 5, 52, 244 },
+	};
+
+	for (unsigned l = 0; l < sizeof(layers) / sizeof(layers[0]); l++) {
+		int prevX = 0, prevY = 0;
+
+		for (int i = 0; i <= 12; i++) {
+			int x = (i * 320) / 12;
+			int a = (layers[l].freq * i + frame * layers[l].speed) * 4;
+			int y = layers[l].baseY
+			      + ((isin(a & (ISIN_PI * 2 - 1)) * layers[l].amp) >> ISIN_SHIFT);
+
+			if (i > 0) {
+				for (int s = 0; s < layers[l].height; s += 2) {
+					int k = 256 - (s * 256) / layers[l].height;
+					int g = 255 - ((255 - layers[l].shade) * k) / 256;
+
+					uint32_t c = ((uint32_t) g << 16) | ((uint32_t) g << 8) | g;
+
+					drawRect(ctx, prevX, prevY + s, x - prevX, 2, c, false);
+				}
+			}
+
+			prevX = x;
+			prevY = y;
+		}
+	}
+}
+
+void setPS1IntroVariant(int variant) {
+	if (variant >= 0 && variant < PS1_INTRO_COUNT)
+		introVariant = variant;
+}
+
 void initPS1Boot(RenderContext *ctx) {
 	(void) ctx;
 
@@ -267,6 +514,68 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
 
 	if (level > 0) {
+		if (introVariant == PS1_INTRO_SPIN3D) {
+			/*
+			 * Variant 2: the mark as a real 3D octahedron that flies in
+			 * from the distance, turning about once, and settles facing
+			 * the camera at the size the flat version occupies.
+			 *
+			 * The whole move happens during the diamond's own fade-in
+			 * window plus the triangle window, so the rest of the
+			 * timeline is untouched.
+			 */
+			int k = ramp(frame, T_DIAMOND_IN, T_TRI_END);
+
+			/* Ease out: fast approach, gentle settle. */
+			int ease = 256 - (((256 - k) * (256 - k)) >> 8);
+
+			int zOff = 900 - ((900 - 260) * ease) / 256;
+			int yaw  = ((256 - ease) * (ISIN_PI * 2)) / 256;   /* ~one turn */
+			int pitch = ((256 - ease) * 180) / 256;
+
+			drawOctahedron(ctx, cx, cy, r, yaw & (ISIN_PI * 2 - 1),
+				pitch, zOff, 256);
+			return;
+		}
+
+		if (introVariant == PS1_INTRO_GLASS ||
+		    introVariant == PS1_INTRO_GLASS_WAVES) {
+			/*
+			 * Variants 1 and 3: the same mark as glass.
+			 *
+			 * Three blended rings outside the shape give an outward glow -
+			 * the same accumulate-by-blending trick the memory card tiles
+			 * use, since the GPU has no real additive mode here. The body
+			 * is then drawn blended so the background shows through, and
+			 * the sparks bounce around inside it.
+			 */
+			for (int g = 3; g >= 1; g--) {
+				int gr = r + g * 5;
+				uint32_t gc = scaleCol(0x0060c0, 256 / (g + 1));
+
+				glassQuad(ctx,
+					cx - gr, cy, cx, cy - gr,
+					cx, cy + gr, cx + gr, cy, gc);
+			}
+
+			/* Glass body: two blended passes so it reads as tinted rather
+			 * than a faint wash, but still see-through. */
+			for (int pass = 0; pass < 2; pass++)
+				glassQuad(ctx,
+					cx - r, cy, cx, cy - r,
+					cx, cy + r, cx + r, cy,
+					scaleCol(0x0060b0, level));
+
+			/* Bright top-left facet, as on the tiles. */
+			glassQuad(ctx,
+				cx - r, cy, cx, cy - r,
+				cx, cy, cx, cy,
+				scaleCol(0x00a0f0, level));
+
+			drawSparks(ctx, cx, cy, r, level);
+			return;
+		}
+
 		// Fading a solid shape in on white: interpolate its colour from
 		// white toward the real one, which is smooth and costs nothing.
 		uint32_t e = edge, c = centre;
@@ -427,6 +736,64 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 	}
 }
 
+/*
+ * Variant picker.
+ *
+ * Deliberately plain: a dark screen, four lines, D-pad and X. It runs before
+ * any of the boot artwork is uploaded, so it cannot depend on it.
+ */
+int chooseIntroVariant(RenderContext *ctx) {
+	static const char *const names[PS1_INTRO_COUNT] = {
+		"1  Classic      flat gradient, as original",
+		"2  Glass        see-through, sparks, glow",
+		"3  3D Diamond   spins in and settles",
+		"4  Glass+Waves  glass over white waves",
+	};
+
+	int sel = 0;
+	bool sawRelease = false;
+
+	for (;;) {
+		uint16_t buttons = pollController(0) | pollController(1);
+		static uint16_t last = 0;
+		uint16_t pressed = buttons & ~last;
+
+		last = buttons;
+
+		if (!buttons)
+			sawRelease = true;
+
+		if (sawRelease) {
+			if (pressed & PAD_BTN_UP)
+				sel = (sel + PS1_INTRO_COUNT - 1) % PS1_INTRO_COUNT;
+			if (pressed & PAD_BTN_DOWN)
+				sel = (sel + 1) % PS1_INTRO_COUNT;
+			if (pressed & (PAD_BTN_CROSS | PAD_BTN_START))
+				break;
+		}
+
+		beginFrame(ctx);
+		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
+			0x201008, false);
+
+		printString(ctx, 16, 24, 0xffffff, "INTRO STYLE TEST");
+		printString(ctx, 16, 40, 0x808080,
+			"D-PAD choose      " CH_PS1_CROSS_BUTTON " start");
+
+		for (int i = 0; i < PS1_INTRO_COUNT; i++) {
+			printString(ctx, 24, 72 + i * 16,
+				(i == sel) ? 0x1256e3 : 0xa0a0a0, names[i]);
+		}
+
+		endFrame(ctx);
+	}
+
+	while (pollController(0) | pollController(1))
+		;
+
+	return sel;
+}
+
 void runPS1Boot(RenderContext *ctx) {
 	/*
 	 * Skip handling is deliberately defensive.
@@ -462,6 +829,11 @@ void runPS1Boot(RenderContext *ctx) {
 
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
 			white ? 0xffffff : 0x000000, false);
+
+		// Variant 4 replaces the flat white field with a wave field, still
+		// in white so the black artwork on top stays readable.
+		if (white && introVariant == PS1_INTRO_GLASS_WAVES)
+			drawWhiteWaves(ctx, frame);
 
 		if (white) {
 			int out = frame >= T_SCE_OUT

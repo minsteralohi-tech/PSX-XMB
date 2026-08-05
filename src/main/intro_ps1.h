@@ -47,6 +47,28 @@ extern "C" {
  */
 #define PS1_BOOT_TEXTURES 1
 
+/*
+ * Which look the SCE screen uses. A menu at boot picks one, so all three can
+ * be compared on hardware from a single build - scaffolding for choosing a
+ * direction, not a permanent feature.
+ */
+typedef enum {
+	PS1_INTRO_CLASSIC = 0,   /* flat gradient, exactly like the original    */
+	PS1_INTRO_GLASS,         /* translucent glass, inner sparks, outer glow */
+	PS1_INTRO_SPIN3D,        /* 3D octahedron flying in and settling        */
+	PS1_INTRO_GLASS_WAVES,   /* glass, over a white Gouraud wave field      */
+	PS1_INTRO_COUNT
+} PS1IntroVariant;
+
+/* Set to 0 once a direction is settled on. */
+#define PS1_BOOT_SHOW_MENU 1
+
+/* Show the variant picker and return the chosen one. */
+int chooseIntroVariant(RenderContext *ctx);
+
+/* Select the look used by runPS1Boot(). */
+void setPS1IntroVariant(int variant);
+
 /* Upload the four logo/text textures. Call once, after the GPU is up. */
 void initPS1Boot(RenderContext *ctx);
 
