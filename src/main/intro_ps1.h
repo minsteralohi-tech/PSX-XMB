@@ -48,7 +48,7 @@ extern "C" {
  * Draw and upload the four logo/wordmark textures. Set to 0 to run the
  * sequence as flat polygons only - see the bisect note above.
  */
-#define PS1_BOOT_TEXTURES 0
+#define PS1_BOOT_TEXTURES 1
 
 /* Upload the four logo/text textures. Call once, after the GPU is up. */
 void initPS1Boot(RenderContext *ctx);
