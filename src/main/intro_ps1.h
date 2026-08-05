@@ -42,7 +42,7 @@ extern "C" {
  *
  * That single build distinguishes the three candidates without a debugger.
  */
-#define PS1_BOOT_ENABLED  0
+#define PS1_BOOT_ENABLED  1
 
 /*
  * Draw and upload the four logo/wordmark textures. Set to 0 to run the
