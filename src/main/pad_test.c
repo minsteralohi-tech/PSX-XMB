@@ -288,9 +288,13 @@ static void drawAnalogStick(
 	int           centerY,
 	uint8_t       rawX,
 	uint8_t       rawY,
-	bool          active
+	bool          active,
+	bool          clicked
 ) {
-	const int radius = 16;
+	// 14, not 16: the indicator is now an 18x16 glyph rather than a 6x6
+	// dot, so at full deflection it extends 8px further than the cross arm.
+	// This keeps its lowest edge clear of the "L stick"/"R stick" labels.
+	const int radius = 14;
 
 	drawRect(ctx, centerX - radius, centerY - 1, radius * 2, 2, 0x383838, false);
 	drawRect(ctx, centerX - 1, centerY - radius, 2, radius * 2, 0x383838, false);
@@ -303,7 +307,16 @@ static void drawAnalogStick(
 		dotY += ((int) rawY - 128) * radius / 128;
 	}
 
-	drawRect(ctx, dotX - 3, dotY - 3, 6, 6, active ? HIGHLIGHT_COLOR : 0x505050, false);
+	// The stick glyph IS the indicator: it rides the cross instead of a
+	// plain square, and swaps to its pressed artwork when the stick is
+	// clicked (L3/R3). That replaces both the old blue dot and the separate
+	// fixed L3/R3 buttons that used to sit above the cross.
+	drawPadGlyph(
+		ctx,
+		PAD_GLYPH_STICK + (clicked ? PAD_GLYPH_PRESSED : 0),
+		dotX - PAD_GLYPH_W / 2,
+		dotY - PAD_GLYPH_H / 2
+	);
 }
 
 static void drawPad(RenderContext *ctx, int baseX, int port, const PadState *pad) {
@@ -359,14 +372,12 @@ static void drawPad(RenderContext *ctx, int baseX, int port, const PadState *pad
 
 	// L3/R3 (stick clicks), only meaningful on analog pads but harmless to
 	// show regardless
-	// The stick glyph doubles as the L3/R3 indicator - one piece of art for
-	// both, since a stick click has no separate icon on a real pad either.
-	drawPadButton(ctx, baseX + 31,  140, PAD_GLYPH_STICK, pad->buttons & PAD_BTN_L3);
-	drawPadButton(ctx, baseX + 111, 140, PAD_GLYPH_STICK, pad->buttons & PAD_BTN_R3);
-
-	// Analog sticks
-	drawAnalogStick(ctx, baseX + 40,  174, pad->leftX,  pad->leftY,  isAnalog);
-	drawAnalogStick(ctx, baseX + 120, 174, pad->rightX, pad->rightY, isAnalog);
+	// Analog sticks. L3/R3 are shown by the stick glyph switching to its
+	// pressed artwork, so they need no separate buttons of their own.
+	drawAnalogStick(ctx, baseX + 40,  168, pad->leftX,  pad->leftY,  isAnalog,
+		pad->buttons & PAD_BTN_L3);
+	drawAnalogStick(ctx, baseX + 120, 168, pad->rightX, pad->rightY, isAnalog,
+		pad->buttons & PAD_BTN_R3);
 
 	printString(ctx, baseX + 4, 193, 0x505050, "L stick");
 	printString(ctx, baseX + 96, 193, 0x505050, "R stick");

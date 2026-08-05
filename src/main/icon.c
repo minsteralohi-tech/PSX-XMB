@@ -54,12 +54,21 @@ extern const uint8_t padGlyphTexture[], padGlyphPalette[];
 /*
  * Pad tester button glyphs. 8 x 4 grid of 18x16 cells: cells 0-14 are the
  * unpressed glyphs, cells 16-30 the pressed ones, so a pressed lookup is just
- * index + PAD_GLYPH_PRESSED. Sits after the item sheet in VRAM (144px at 4bpp
- * = 36 columns, 832..868) with its CLUT after the other two.
+ * index + PAD_GLYPH_PRESSED.
+ *
+ * VRAM x=960, NOT 832. The gap immediately after the item sheet looks free
+ * but is not: xmb_bg.c parks the sun/lava/earth/moon planet textures at
+ * x=832, four 8bpp 256x128 sheets stacked down the full height of VRAM
+ * (128 columns each, 832..960). Putting the glyphs there meant the planet
+ * textures overwrote them on every theme load, which showed up as the glyphs
+ * rendering as coloured noise while still being the right shape and size.
+ *
+ * 960..996 (144px at 4bpp = 36 columns) is genuinely free, and 960 is an
+ * exact multiple of 64 as the texpage base requires.
  */
 #define PAD_GLYPH_SHEET_W 144
 #define PAD_GLYPH_SHEET_H  64
-#define PAD_GLYPH_VRAM_X  832
+#define PAD_GLYPH_VRAM_X  960
 #define PAD_GLYPH_VRAM_Y    0
 #define PAD_GLYPH_CLUT_X  736
 #define PAD_GLYPH_CLUT_Y  256

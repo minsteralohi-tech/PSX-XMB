@@ -1785,7 +1785,10 @@ static void drawFireRing(GPUDMAChain *chain, int px, int py, int radius, uint32_
  * cheap flat-colour glow disc, so it has to stay modest or Nebula 2 would
  * overflow the GPU chain the same way the original Nebula crash did.
  */
-#define SUN_TEX_VRAM_X 832   // clear of the icon sheets (which end at 832)
+#define SUN_TEX_VRAM_X 832   // clear of the icon sheets (which end at 832);
+                             // these four planet sheets then occupy 832..960
+                             // for the FULL height of VRAM - see icon.c's
+                             // PAD_GLYPH_VRAM_X note before reusing that range
 #define SUN_TEX_VRAM_Y   0
 #define SUN_TEX_CLUT_X   0   // spare VRAM below the framebuffers (y >= 240)
 #define SUN_TEX_CLUT_Y 241
