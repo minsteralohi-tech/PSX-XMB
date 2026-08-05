@@ -94,6 +94,7 @@ addPS1Executable(
 	src/main/app_launch.c
 	src/main/gameid.c
 	src/main/intro.c
+	src/main/intro_ps1.c
 	src/main/app_stub.s
 	src/main/music_settings.c
 	src/main/unirom_launch.c
@@ -124,6 +125,15 @@ addBinaryFile("${RELEASE_NAME}" catPalette "${PROJECT_BINARY_DIR}/assets/catPale
 
 convertImage(assets/icons_item.png 4 assets/itemTexture.dat assets/itemPalette.dat)
 convertImage(assets/padglyphs.png 4 assets/padGlyphTexture.dat assets/padGlyphPalette.dat)
+
+# PS1 boot sequence artwork. The two logos are rasterised from the original
+# SVGs and the two wordmarks from the original TTFs by tools/svg2png.py and
+# a one-off PIL script - see docs/PS1-BOOT-SEQUENCE.md. All four are hard
+# edged (2-5 colours) so they survive 4bpp without dithering.
+convertImage(assets/intro_sony.png 4 assets/introSonyTexture.dat assets/introSonyPalette.dat)
+convertImage(assets/intro_scetext.png 4 assets/introSceTextTexture.dat assets/introSceTextPalette.dat)
+convertImage(assets/intro_pslogo.png 4 assets/introPsLogoTexture.dat assets/introPsLogoPalette.dat)
+convertImage(assets/intro_pstext.png 4 assets/introPsTextTexture.dat assets/introPsTextPalette.dat)
 addBinaryFile("${RELEASE_NAME}" itemTexture "${PROJECT_BINARY_DIR}/assets/itemTexture.dat")
 addBinaryFile("${RELEASE_NAME}" itemPalette "${PROJECT_BINARY_DIR}/assets/itemPalette.dat")
 
@@ -132,6 +142,15 @@ addBinaryFile("${RELEASE_NAME}" itemPalette "${PROJECT_BINARY_DIR}/assets/itemPa
 # of a highlight box behind a label.
 addBinaryFile("${RELEASE_NAME}" padGlyphTexture "${PROJECT_BINARY_DIR}/assets/padGlyphTexture.dat")
 addBinaryFile("${RELEASE_NAME}" padGlyphPalette "${PROJECT_BINARY_DIR}/assets/padGlyphPalette.dat")
+
+addBinaryFile("${RELEASE_NAME}" introSonyTexture "${PROJECT_BINARY_DIR}/assets/introSonyTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introSonyPalette "${PROJECT_BINARY_DIR}/assets/introSonyPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introSceTextTexture "${PROJECT_BINARY_DIR}/assets/introSceTextTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introSceTextPalette "${PROJECT_BINARY_DIR}/assets/introSceTextPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introPsLogoTexture "${PROJECT_BINARY_DIR}/assets/introPsLogoTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introPsLogoPalette "${PROJECT_BINARY_DIR}/assets/introPsLogoPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introPsTextTexture "${PROJECT_BINARY_DIR}/assets/introPsTextTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introPsTextPalette "${PROJECT_BINARY_DIR}/assets/introPsTextPalette.dat")
 
 # Sun/lava surface texture for the Nebula 2 theme's hero planet (8bpp: a
 # photographic gradient texture needs more than 16 colours to avoid banding).
