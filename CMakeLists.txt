@@ -131,7 +131,9 @@ convertImage(assets/padglyphs.png 4 assets/padGlyphTexture.dat assets/padGlyphPa
 # a one-off PIL script - see docs/PS1-BOOT-SEQUENCE.md. All four are hard
 # edged (2-5 colours) so they survive 4bpp without dithering.
 convertImage(assets/intro_sony.png 4 assets/introSonyTexture.dat assets/introSonyPalette.dat)
-convertImage(assets/intro_scetext.png 4 assets/introSceTextTexture.dat assets/introSceTextPalette.dat)
+convertImage(assets/intro_computer.png 4 assets/introComputerTexture.dat assets/introComputerPalette.dat)
+convertImage(assets/intro_enter.png 4 assets/introEnterTexture.dat assets/introEnterPalette.dat)
+convertImage(assets/intro_tm.png 4 assets/introTmTexture.dat assets/introTmPalette.dat)
 convertImage(assets/intro_pslogo.png 4 assets/introPsLogoTexture.dat assets/introPsLogoPalette.dat)
 convertImage(assets/intro_pstext.png 4 assets/introPsTextTexture.dat assets/introPsTextPalette.dat)
 addBinaryFile("${RELEASE_NAME}" itemTexture "${PROJECT_BINARY_DIR}/assets/itemTexture.dat")
@@ -145,8 +147,12 @@ addBinaryFile("${RELEASE_NAME}" padGlyphPalette "${PROJECT_BINARY_DIR}/assets/pa
 
 addBinaryFile("${RELEASE_NAME}" introSonyTexture "${PROJECT_BINARY_DIR}/assets/introSonyTexture.dat")
 addBinaryFile("${RELEASE_NAME}" introSonyPalette "${PROJECT_BINARY_DIR}/assets/introSonyPalette.dat")
-addBinaryFile("${RELEASE_NAME}" introSceTextTexture "${PROJECT_BINARY_DIR}/assets/introSceTextTexture.dat")
-addBinaryFile("${RELEASE_NAME}" introSceTextPalette "${PROJECT_BINARY_DIR}/assets/introSceTextPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introComputerTexture "${PROJECT_BINARY_DIR}/assets/introComputerTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introComputerPalette "${PROJECT_BINARY_DIR}/assets/introComputerPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introEnterTexture "${PROJECT_BINARY_DIR}/assets/introEnterTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introEnterPalette "${PROJECT_BINARY_DIR}/assets/introEnterPalette.dat")
+addBinaryFile("${RELEASE_NAME}" introTmTexture "${PROJECT_BINARY_DIR}/assets/introTmTexture.dat")
+addBinaryFile("${RELEASE_NAME}" introTmPalette "${PROJECT_BINARY_DIR}/assets/introTmPalette.dat")
 addBinaryFile("${RELEASE_NAME}" introPsLogoTexture "${PROJECT_BINARY_DIR}/assets/introPsLogoTexture.dat")
 addBinaryFile("${RELEASE_NAME}" introPsLogoPalette "${PROJECT_BINARY_DIR}/assets/introPsLogoPalette.dat")
 addBinaryFile("${RELEASE_NAME}" introPsTextTexture "${PROJECT_BINARY_DIR}/assets/introPsTextTexture.dat")
