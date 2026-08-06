@@ -47,9 +47,12 @@
 #include "main/renderer.h"
 #include "main/sound.h"
 #include "main/trig.h"
+#include "main/xmb_bg.h"
 
 extern const uint8_t introSonyTexture[],   introSonyPalette[];
-extern const uint8_t introSceTextTexture[], introSceTextPalette[];
+extern const uint8_t introComputerTexture[], introComputerPalette[];
+extern const uint8_t introEnterTexture[],    introEnterPalette[];
+extern const uint8_t introTmTexture[],       introTmPalette[];
 extern const uint8_t introPsLogoTexture[], introPsLogoPalette[];
 extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 
@@ -86,39 +89,76 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
  */
 #define SONY_W 160   /* padded; artwork is 160x28 */
 #define SONY_H  32
-#define SCET_W 128   /* padded; artwork is 122x24 */
-#define SCET_H  24
+#define COMP_W 128   /* padded; artwork is 124x16 */
+#define COMP_H  16
+#define ENTR_W 128   /* padded; artwork is 127x11 */
+#define ENTR_H  16
+#define TM_W    16   /* padded; artwork is 15x10  */
+#define TM_H    16
 #define PSLG_W  96   /* padded; artwork is 90x82  */
 #define PSLG_H  88
-#define PSTX_W  80   /* padded; artwork is 73x16  */
-#define PSTX_H  16
+#define PSTX_W  80   /* padded; artwork is 80x18  */
+#define PSTX_H  24
 
 /* Visible artwork inside each padded texture. */
 #define SONY_DW 160
 #define SONY_DH  28
-#define SCET_DW 122
-#define SCET_DH  24
+#define COMP_DW 124
+#define COMP_DH  16
+#define ENTR_DW 127
+#define ENTR_DH  11
+#define TM_DW    15
+#define TM_DH    10
 #define PSLG_DW  90
 #define PSLG_DH  82
-#define PSTX_DW  73
-#define PSTX_DH  16
+#define PSTX_DW  80
+#define PSTX_DH  18
 
 #define INTRO_VRAM_X 960
 #define SONY_VRAM_Y   64
-#define SCET_VRAM_Y   96
+#define COMP_VRAM_Y   96
+#define ENTR_VRAM_Y  112
+#define TM_VRAM_Y    240
 #define PSLG_VRAM_Y  128
-#define PSTX_VRAM_Y  224
+#define PSTX_VRAM_Y  216
 
 #define SONY_CLUT_X 752
-#define SCET_CLUT_X 768
+#define COMP_CLUT_X 768
+#define ENTR_CLUT_X 816
+#define TM_CLUT_X   832
 #define PSLG_CLUT_X 784
 #define PSTX_CLUT_X 800
 #define INTRO_CLUT_Y 256
 
-static TextureInfo sonyTex, sceTextTex, psLogoTex, psTextTex;
+static TextureInfo sonyTex, computerTex, enterTex, tmTex, psLogoTex, psTextTex;
 
 /* Which look to use, chosen from the boot menu. See PS1IntroVariant. */
 static int introVariant = PS1_INTRO_CLASSIC;
+
+/*
+ * Spin support.
+ *
+ * The whole mark - diamond and both triangles - is rotated about the screen
+ * centre as a flat object. Rotating the vertices rather than doing anything
+ * three-dimensional keeps the shape and the gradients exactly as they are;
+ * it is the same picture, turned.
+ *
+ * introSpin is 0 for every variant except Spin, where it runs through one
+ * full turn across the same window the triangles animate in.
+ */
+static int introSpin;
+
+static void rotatePoint(int cx, int cy, int *x, int *y) {
+	if (!introSpin)
+		return;
+
+	int dx = *x - cx, dy = *y - cy;
+	int s = isin(introSpin), c = icos(introSpin);
+
+	*x = cx + ((dx * c - dy * s) >> ISIN_SHIFT);
+	*y = cy + ((dx * s + dy * c) >> ISIN_SHIFT);
+}
+
 
 /* --- timeline, in frames --------------------------------------------- */
 #define T_DIAMOND_IN     0
@@ -179,10 +219,24 @@ static void gouraudQuad(
 	int x2, int y2, uint32_t c2,
 	int x3, int y3, uint32_t c3
 ) {
+	// Every vertex goes through the spin, so the Spin variant needs no
+	// separate drawing code at all - it is the same quads, turned.
+	int cx = SQ_X + SQ / 2, cy = SQ_Y + SQ / 2;
+
+	rotatePoint(cx, cy, &x0, &y0);
+	rotatePoint(cx, cy, &x1, &y1);
+	rotatePoint(cx, cy, &x2, &y2);
+	rotatePoint(cx, cy, &x3, &y3);
+
+	// Glass is the same fill drawn semi-transparently. Nothing else about
+	// the shape or the gradient changes.
+	bool blend = (introVariant == PS1_INTRO_GLASS)
+	          || (introVariant == PS1_INTRO_GLASS_WAVES);
+
 	GPUDMAChain *chain = getCurrentChain(ctx);
 	uint32_t *ptr = allocateGP0Packet(chain, 8);
 
-	ptr[0] = c0 | gp0_shadedQuad(true, false, false);
+	ptr[0] = c0 | gp0_shadedQuad(true, false, blend);
 	ptr[1] = gp0_xy(x0, y0);
 	ptr[2] = c1;
 	ptr[3] = gp0_xy(x1, y1);
@@ -233,11 +287,17 @@ static void spriteFadeOnLight(
 }
 
 /* ===================================================================== *
- * Variant support
+ * Variants
  *
- * Three looks for the SCE screen, chosen from a menu at boot so they can be
- * compared on real hardware in a single build. All three share the timeline,
- * the wordmarks and the PlayStation screen - only the diamond changes.
+ * These are ADJUSTMENTS to the original mark, not redesigns. The geometry,
+ * the colours and the timeline are identical in all four - the first attempt
+ * replaced the artwork with new shapes, which was the wrong idea. What
+ * changes is only how the same quads are drawn:
+ *
+ *   Classic      as the original
+ *   Glass        the same quads, blended, so the background shows through
+ *   Spin         the same flat quads, rotated about the centre once
+ *   Waves        the same mark, over the real wave theme in white
  * ===================================================================== */
 
 /* Scale a 0xBBGGRR colour by n/256, clamped. */
@@ -251,222 +311,6 @@ static uint32_t scaleCol(uint32_t c, int n) {
 	if (b > 0xff) b = 0xff;
 
 	return (b << 16) | (g << 8) | r;
-}
-
-/* Blended flat quad, for the glass body and the glow rings. */
-static void glassQuad(
-	RenderContext *ctx,
-	int x0, int y0, int x1, int y1,
-	int x2, int y2, int x3, int y3,
-	uint32_t colour
-) {
-	GPUDMAChain *chain = getCurrentChain(ctx);
-	uint32_t *ptr = allocateGP0Packet(chain, 5);
-
-	ptr[0] = colour | gp0_shadedQuad(false, false, true);
-	ptr[1] = gp0_xy(x0, y0);
-	ptr[2] = gp0_xy(x1, y1);
-	ptr[3] = gp0_xy(x2, y2);
-	ptr[4] = gp0_xy(x3, y3);
-}
-
-/*
- * Sparks bouncing inside the diamond.
- *
- * A point is inside a rhombus when |dx|/rx + |dy|/ry <= 1, which is the
- * cheapest containment test available - no square roots, no trig. On a hit
- * the velocity component with the larger contribution is flipped, which is a
- * good enough approximation of reflecting off a slanted wall at this size
- * and costs nothing.
- */
-#define SPARK_COUNT 14
-
-typedef struct {
-	int x, y, vx, vy;
-} Spark;
-
-static Spark sparks[SPARK_COUNT];
-static bool  sparksReady;
-
-static void resetSparks(int r) {
-	for (int i = 0; i < SPARK_COUNT; i++) {
-		/* Deterministic spread - no RNG needed and it looks the same on
-		 * every boot, which makes comparing the variants easier. */
-		sparks[i].x  = ((i * 37) % (r)) - r / 2;
-		sparks[i].y  = ((i * 53) % (r)) - r / 2;
-		sparks[i].vx = ((i % 5) - 2) * 2 + 1;
-		sparks[i].vy = ((i % 7) - 3) * 2 + 1;
-	}
-
-	sparksReady = true;
-}
-
-static void drawSparks(RenderContext *ctx, int cx, int cy, int r, int level) {
-	if (!sparksReady)
-		resetSparks(r);
-
-	for (int i = 0; i < SPARK_COUNT; i++) {
-		Spark *s = &sparks[i];
-
-		s->x += s->vx;
-		s->y += s->vy;
-
-		int ax = s->x < 0 ? -s->x : s->x;
-		int ay = s->y < 0 ? -s->y : s->y;
-
-		/* Outside the rhombus? Flip whichever axis is pushing hardest. */
-		if (ax + ay > r - 4) {
-			if (ax > ay)
-				s->vx = -s->vx;
-			else
-				s->vy = -s->vy;
-
-			s->x += s->vx;
-			s->y += s->vy;
-		}
-
-		uint32_t c = scaleCol(0x80c0ff, level);   /* warm white */
-
-		drawRect(ctx, cx + s->x, cy + s->y, 2, 2, c, true);
-	}
-}
-
-/* ---- variant 2: a 3D diamond (octahedron) --------------------------- */
-
-#define OCTA_FACES 8
-
-static const int octaFace[OCTA_FACES][3] = {
-	{0, 2, 4}, {0, 4, 3}, {0, 3, 5}, {0, 5, 2},
-	{1, 4, 2}, {1, 3, 4}, {1, 5, 3}, {1, 2, 5},
-};
-
-/*
- * Draw the diamond as a rotating octahedron.
- *
- * Six vertices on the axes, eight triangular faces, painter-sorted by
- * average depth. Projection is the same simple perspective the rest of this
- * project uses - divide by z - rather than the GTE, because this runs a
- * handful of vertices per frame and setting up the coprocessor's matrices
- * would cost more code than it saves.
- */
-static void drawOctahedron(
-	RenderContext *ctx, int cx, int cy, int r,
-	int yaw, int pitch, int zOffset, int level
-) {
-	int vx[6], vy[6], vz[6];
-
-	const int base[6][3] = {
-		{ 0,  1,  0}, { 0, -1,  0},
-		{ 1,  0,  0}, {-1,  0,  0},
-		{ 0,  0,  1}, { 0,  0, -1},
-	};
-
-	int sy = isin(yaw),   cyw = icos(yaw);
-	int sp = isin(pitch), cp  = icos(pitch);
-
-	for (int i = 0; i < 6; i++) {
-		int x = base[i][0] * r;
-		int y = base[i][1] * r;
-		int z = base[i][2] * r;
-
-		/* Yaw about Y, then pitch about X. */
-		int x1 = (x * cyw + z * sy) >> ISIN_SHIFT;
-		int z1 = (z * cyw - x * sy) >> ISIN_SHIFT;
-		int y1 = (y * cp - z1 * sp) >> ISIN_SHIFT;
-		int z2 = (z1 * cp + y * sp) >> ISIN_SHIFT;
-
-		int depth = z2 + zOffset;
-
-		if (depth < 32)
-			depth = 32;
-
-		vx[i] = cx + (x1 * 220) / depth;
-		vy[i] = cy + (y1 * 220) / depth;
-		vz[i] = depth;
-	}
-
-	/* Painter's algorithm: draw the far faces first. */
-	int order[OCTA_FACES];
-	int key[OCTA_FACES];
-
-	for (int f = 0; f < OCTA_FACES; f++) {
-		order[f] = f;
-		key[f] = (vz[octaFace[f][0]] + vz[octaFace[f][1]]
-		        + vz[octaFace[f][2]]) / 3;
-	}
-
-	for (int a = 0; a < OCTA_FACES - 1; a++) {
-		for (int b = a + 1; b < OCTA_FACES; b++) {
-			if (key[order[b]] > key[order[a]]) {
-				int tmp = order[a];
-				order[a] = order[b];
-				order[b] = tmp;
-			}
-		}
-	}
-
-	for (int i = 0; i < OCTA_FACES; i++) {
-		int f = order[i];
-		const int *fv = octaFace[f];
-
-		/* Shade by face index so adjacent faces separate, then by the
-		 * fade level. Alternating warm tones keep it reading as the same
-		 * orange mark rather than a grey solid. */
-		uint32_t base_c = (f & 1) ? 0x0517e0 : 0x0093df;
-		uint32_t c = scaleCol(base_c, level);
-
-		GPUDMAChain *chain = getCurrentChain(ctx);
-		uint32_t *ptr = allocateGP0Packet(chain, 5);
-
-		ptr[0] = c | gp0_shadedQuad(false, false, false);
-		ptr[1] = gp0_xy(vx[fv[0]], vy[fv[0]]);
-		ptr[2] = gp0_xy(vx[fv[1]], vy[fv[1]]);
-		ptr[3] = gp0_xy(vx[fv[2]], vy[fv[2]]);
-		ptr[4] = gp0_xy(vx[fv[2]], vy[fv[2]]);
-	}
-}
-
-/* ---- variant 3: white Gouraud wave field ---------------------------- */
-
-/*
- * The menu's wave theme, drawn in white instead of blue.
- *
- * Not a call into xmb_bg.c: that renderer's colours come from the theme
- * palette and there is no white entry, so recolouring it would mean adding a
- * palette nobody can select. Three sine bands with a vertical falloff is the
- * same shape of effect and stays local to the intro.
- */
-static void drawWhiteWaves(RenderContext *ctx, int frame) {
-	static const struct { int baseY, amp, freq, speed, height, shade; } layers[] = {
-		{ 118, 14, 26, 6, 46, 232 },
-		{ 132, 18, 34, 9, 38, 214 },
-		{ 126, 11, 20, 5, 52, 244 },
-	};
-
-	for (unsigned l = 0; l < sizeof(layers) / sizeof(layers[0]); l++) {
-		int prevX = 0, prevY = 0;
-
-		for (int i = 0; i <= 12; i++) {
-			int x = (i * 320) / 12;
-			int a = (layers[l].freq * i + frame * layers[l].speed) * 4;
-			int y = layers[l].baseY
-			      + ((isin(a & (ISIN_PI * 2 - 1)) * layers[l].amp) >> ISIN_SHIFT);
-
-			if (i > 0) {
-				for (int s = 0; s < layers[l].height; s += 2) {
-					int k = 256 - (s * 256) / layers[l].height;
-					int g = 255 - ((255 - layers[l].shade) * k) / 256;
-
-					uint32_t c = ((uint32_t) g << 16) | ((uint32_t) g << 8) | g;
-
-					drawRect(ctx, prevX, prevY + s, x - prevX, 2, c, false);
-				}
-			}
-
-			prevX = x;
-			prevY = y;
-		}
-	}
 }
 
 void setPS1IntroVariant(int variant) {
@@ -483,9 +327,17 @@ void initPS1Boot(RenderContext *ctx) {
 		INTRO_VRAM_X, SONY_VRAM_Y, SONY_CLUT_X, INTRO_CLUT_Y,
 		SONY_W, SONY_H, GP0_COLOR_4BPP);
 
-	uploadIndexedTexture(&sceTextTex, introSceTextTexture, introSceTextPalette,
-		INTRO_VRAM_X, SCET_VRAM_Y, SCET_CLUT_X, INTRO_CLUT_Y,
-		SCET_W, SCET_H, GP0_COLOR_4BPP);
+	uploadIndexedTexture(&computerTex, introComputerTexture, introComputerPalette,
+		INTRO_VRAM_X, COMP_VRAM_Y, COMP_CLUT_X, INTRO_CLUT_Y,
+		COMP_W, COMP_H, GP0_COLOR_4BPP);
+
+	uploadIndexedTexture(&enterTex, introEnterTexture, introEnterPalette,
+		INTRO_VRAM_X, ENTR_VRAM_Y, ENTR_CLUT_X, INTRO_CLUT_Y,
+		ENTR_W, ENTR_H, GP0_COLOR_4BPP);
+
+	uploadIndexedTexture(&tmTex, introTmTexture, introTmPalette,
+		INTRO_VRAM_X, TM_VRAM_Y, TM_CLUT_X, INTRO_CLUT_Y,
+		TM_W, TM_H, GP0_COLOR_4BPP);
 
 	uploadIndexedTexture(&psLogoTex, introPsLogoTexture, introPsLogoPalette,
 		INTRO_VRAM_X, PSLG_VRAM_Y, PSLG_CLUT_X, INTRO_CLUT_Y,
@@ -500,6 +352,22 @@ void initPS1Boot(RenderContext *ctx) {
 /* --- the SCE (white) screen ------------------------------------------- */
 
 static void drawSceScreen(RenderContext *ctx, int frame) {
+	/*
+	 * Spin variant: one full turn over the same window the triangles
+	 * animate in, easing to a stop so it lands square rather than
+	 * snapping. Zero for every other variant, which makes rotatePoint()
+	 * a no-op and leaves the original untouched.
+	 */
+	introSpin = 0;
+
+	if (introVariant == PS1_INTRO_SPIN) {
+		int k = ramp(frame, T_DIAMOND_IN, T_TRI_END);
+		int ease = 256 - (((256 - k) * (256 - k)) >> 8);
+
+		introSpin = ((256 - ease) * (ISIN_PI * 2)) / 256;
+		introSpin &= (ISIN_PI * 2) - 1;
+	}
+
 	// The CSS gradient is horizontal: #E01705 at both edges, #DF9300 in the
 	// middle. On a rhombus whose left and right corners sit at the edges and
 	// whose top and bottom corners sit at the centre, that is exactly a
@@ -514,7 +382,7 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
 
 	if (level > 0) {
-		if (introVariant == PS1_INTRO_SPIN3D) {
+		if (introVariant == PS1_INTRO_SPIN) {
 			/*
 			 * Variant 2: the mark as a real 3D octahedron that flies in
 			 * from the distance, turning about once, and settles facing
@@ -667,18 +535,22 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 
 	if (textLevel > 0) {
 #if PS1_BOOT_TEXTURES
+		// Positions below are measured off the real BIOS screens, as
+		// percentages of the 4:3 frame, rather than guessed from the CSS.
 		spriteFadeOnLight(ctx, &sonyTex,
-			SQ_X + (SQ - SONY_DW) / 2, PCT_Y(5), SONY_DW, SONY_DH, textLevel);
+			(ctx->screenWidth - SONY_DW) / 2, 22, SONY_DW, SONY_DH, textLevel);
 
-		spriteFadeOnLight(ctx, &sceTextTex,
-			SQ_X + (SQ - SCET_DW) / 2, PCT_Y(94) - SCET_DH,
-			SCET_DW, SCET_DH, textLevel);
+		spriteFadeOnLight(ctx, &computerTex,
+			(ctx->screenWidth - COMP_DW) / 2, 198, COMP_DW, COMP_DH, textLevel);
+
+		spriteFadeOnLight(ctx, &enterTex,
+			(ctx->screenWidth - ENTR_DW) / 2, 214, ENTR_DW, ENTR_DH, textLevel);
 #endif
 
 		// The trademark mark, drawn in the dashboard's own font: it is two
 		// characters at 3vmin and rasterising an asset for it would cost
 		// more than it is worth.
-		printString(ctx, cx + (SQ * 11) / 100, PCT_Y(72), 0x202020, "TM");
+		spriteFadeOnLight(ctx, &tmTex, cx + 26, 178, TM_DW, TM_DH, textLevel);
 	}
 }
 
@@ -705,7 +577,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psLogoTex,
-			SQ_X + (SQ - PSLG_DW) / 2, PCT_Y(16), PSLG_DW, PSLG_DH, tint, false);
+			(ctx->screenWidth - PSLG_DW) / 2, 26, PSLG_DW, PSLG_DH, tint, false);
 #endif
 	}
 
@@ -715,7 +587,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
 		sprite(ctx, &psTextTex,
-			SQ_X + (SQ - PSTX_DW) / 2, PCT_Y(47), PSTX_DW, PSTX_DH, tint, false);
+			(ctx->screenWidth - PSTX_DW) / 2, 138, PSTX_DW, PSTX_DH, tint, false);
 #endif
 	}
 
@@ -731,7 +603,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		for (int i = 0; i < 2; i++) {
 			int w = getStringWidth(lines[i]);
 			printString(ctx, (ctx->screenWidth - w) / 2,
-				PCT_Y(61) + i * 12, col, lines[i]);
+				170 + i * 11, col, lines[i]);
 		}
 	}
 }
@@ -745,9 +617,9 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 int chooseIntroVariant(RenderContext *ctx) {
 	static const char *const names[PS1_INTRO_COUNT] = {
 		"1  Classic      flat gradient, as original",
-		"2  Glass        see-through, sparks, glow",
-		"3  3D Diamond   spins in and settles",
-		"4  Glass+Waves  glass over white waves",
+		"2  Glass        same logo, see-through",
+		"3  Spin         same logo, spun once",
+		"4  White Waves  logo over white wave theme",
 	};
 
 	int sel = 0;
@@ -832,8 +704,22 @@ void runPS1Boot(RenderContext *ctx) {
 
 		// Variant 4 replaces the flat white field with a wave field, still
 		// in white so the black artwork on top stays readable.
-		if (white && introVariant == PS1_INTRO_GLASS_WAVES)
-			drawWhiteWaves(ctx, frame);
+		/*
+		 * Variant 4 replaces the flat white field with the REAL wave
+		 * theme - the same drawXMBBackground() the menu uses - with its
+		 * palette forced white. Reusing the renderer is what makes it
+		 * look like the menu's waves rather than an approximation; the
+		 * hand-rolled version this replaces came out a pixelated mess.
+		 */
+		if (white && introVariant == PS1_INTRO_GLASS_WAVES) {
+			uint8_t saved = xmbThemeIndex;
+
+			xmbThemeIndex = 0;              /* the palette-driven theme */
+			xmbSetWhitePalette(true);
+			drawXMBBackground(ctx);
+			xmbSetWhitePalette(false);
+			xmbThemeIndex = saved;
+		}
 
 		if (white) {
 			int out = frame >= T_SCE_OUT

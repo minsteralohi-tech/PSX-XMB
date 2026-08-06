@@ -114,6 +114,13 @@ void xmbGetIconGradient(uint32_t *top, uint32_t *bot);
 void xmbGetAccentColor(uint32_t *base, uint32_t *glow);
 
 /*
+ * Force the wave theme's palette to a white set, for the boot intro's white
+ * background. Affects the Default theme's renderer only, which is the one
+ * that reads the palette.
+ */
+void xmbSetWhitePalette(bool enable);
+
+/*
  * Wave style for the customizable PSP wave theme: 10 variants ranging from a
  * few fat slow ribbons to many thin fast ones. Named "Style 1".."Style 10"
  * in the menu; drawGouraudPSP() reads xmbWaveStyle to pick band count and

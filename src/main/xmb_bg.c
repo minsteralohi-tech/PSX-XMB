@@ -447,7 +447,34 @@ static const XMBPalette xmbPalettes[XMB_PALETTE_COUNT] = {
 	  {249,189,144}, {252,229,211} }
 };
 
+/*
+ * White override for the boot intro.
+ *
+ * The intro needs the wave theme rendered in white. Rather than reimplement
+ * the wave field - the first attempt at that came out a pixelated mess,
+ * because the real thing is a stack of Gouraud quads with per-layer shading
+ * and sparkles, not a few sine lines - this swaps the palette underneath the
+ * existing renderer. Same geometry, same sparkles, same everything, just a
+ * white set of colours.
+ *
+ * Not offered in the palette picker: it only makes sense on the intro's white
+ * background, where a blue wave field would look wrong.
+ */
+static const XMBPalette whitePalette = {
+	{235, 235, 240}, {248, 248, 252}, {150, 150, 165},
+	{200, 200, 215}, {170, 170, 190}, {120, 120, 140}
+};
+
+static bool useWhitePalette;
+
+void xmbSetWhitePalette(bool enable) {
+	useWhitePalette = enable;
+}
+
 static const XMBPalette *currentPalette(void) {
+	if (useWhitePalette)
+		return &whitePalette;
+
 	uint8_t i = xmbPaletteIndex;
 	if (i >= XMB_PALETTE_COUNT)
 		i = 0;

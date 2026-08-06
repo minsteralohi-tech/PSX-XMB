@@ -54,9 +54,9 @@ extern "C" {
  */
 typedef enum {
 	PS1_INTRO_CLASSIC = 0,   /* flat gradient, exactly like the original    */
-	PS1_INTRO_GLASS,         /* translucent glass, inner sparks, outer glow */
-	PS1_INTRO_SPIN3D,        /* 3D octahedron flying in and settling        */
-	PS1_INTRO_GLASS_WAVES,   /* glass, over a white Gouraud wave field      */
+	PS1_INTRO_GLASS,         /* the same mark drawn semi-transparent        */
+	PS1_INTRO_SPIN,          /* the same flat mark, spun once               */
+	PS1_INTRO_GLASS_WAVES,   /* the mark over the wave theme in white       */
 	PS1_INTRO_COUNT
 } PS1IntroVariant;
 
