@@ -188,7 +188,6 @@ static void rotatePoint(int cx, int cy, int *x, int *y) {
 #define SQ_X     40
 #define SQ_Y      0
 
-#define PCT_X(p) (SQ_X + (SQ * (p)) / 100)
 #define PCT_Y(p) (SQ_Y + (SQ * (p)) / 100)
 
 static int clampi(int v, int lo, int hi) {
@@ -300,19 +299,6 @@ static void spriteFadeOnLight(
  *   Waves        the same mark, over the real wave theme in white
  * ===================================================================== */
 
-/* Scale a 0xBBGGRR colour by n/256, clamped. */
-static uint32_t scaleCol(uint32_t c, int n) {
-	uint32_t r = ((c        & 0xff) * n) >> 8;
-	uint32_t g = (((c >> 8)  & 0xff) * n) >> 8;
-	uint32_t b = (((c >> 16) & 0xff) * n) >> 8;
-
-	if (r > 0xff) r = 0xff;
-	if (g > 0xff) g = 0xff;
-	if (b > 0xff) b = 0xff;
-
-	return (b << 16) | (g << 8) | r;
-}
-
 void setPS1IntroVariant(int variant) {
 	if (variant >= 0 && variant < PS1_INTRO_COUNT)
 		introVariant = variant;
@@ -382,68 +368,6 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
 
 	if (level > 0) {
-		if (introVariant == PS1_INTRO_SPIN) {
-			/*
-			 * Variant 2: the mark as a real 3D octahedron that flies in
-			 * from the distance, turning about once, and settles facing
-			 * the camera at the size the flat version occupies.
-			 *
-			 * The whole move happens during the diamond's own fade-in
-			 * window plus the triangle window, so the rest of the
-			 * timeline is untouched.
-			 */
-			int k = ramp(frame, T_DIAMOND_IN, T_TRI_END);
-
-			/* Ease out: fast approach, gentle settle. */
-			int ease = 256 - (((256 - k) * (256 - k)) >> 8);
-
-			int zOff = 900 - ((900 - 260) * ease) / 256;
-			int yaw  = ((256 - ease) * (ISIN_PI * 2)) / 256;   /* ~one turn */
-			int pitch = ((256 - ease) * 180) / 256;
-
-			drawOctahedron(ctx, cx, cy, r, yaw & (ISIN_PI * 2 - 1),
-				pitch, zOff, 256);
-			return;
-		}
-
-		if (introVariant == PS1_INTRO_GLASS ||
-		    introVariant == PS1_INTRO_GLASS_WAVES) {
-			/*
-			 * Variants 1 and 3: the same mark as glass.
-			 *
-			 * Three blended rings outside the shape give an outward glow -
-			 * the same accumulate-by-blending trick the memory card tiles
-			 * use, since the GPU has no real additive mode here. The body
-			 * is then drawn blended so the background shows through, and
-			 * the sparks bounce around inside it.
-			 */
-			for (int g = 3; g >= 1; g--) {
-				int gr = r + g * 5;
-				uint32_t gc = scaleCol(0x0060c0, 256 / (g + 1));
-
-				glassQuad(ctx,
-					cx - gr, cy, cx, cy - gr,
-					cx, cy + gr, cx + gr, cy, gc);
-			}
-
-			/* Glass body: two blended passes so it reads as tinted rather
-			 * than a faint wash, but still see-through. */
-			for (int pass = 0; pass < 2; pass++)
-				glassQuad(ctx,
-					cx - r, cy, cx, cy - r,
-					cx, cy + r, cx + r, cy,
-					scaleCol(0x0060b0, level));
-
-			/* Bright top-left facet, as on the tiles. */
-			glassQuad(ctx,
-				cx - r, cy, cx, cy - r,
-				cx, cy, cx, cy,
-				scaleCol(0x00a0f0, level));
-
-			drawSparks(ctx, cx, cy, r, level);
-			return;
-		}
-
 		// Fading a solid shape in on white: interpolate its colour from
 		// white toward the real one, which is smooth and costs nothing.
 		uint32_t e = edge, c = centre;
