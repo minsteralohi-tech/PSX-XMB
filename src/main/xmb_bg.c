@@ -3222,6 +3222,24 @@ static PS_LOGO_SIZE_ATTR void drawLogoOrbitTrails(
 	}
 }
 
+/* One-shot timing shared by 29/29's comet renderer, cube flashes and the
+ * automatic Edge Chase. Keeping it in one place prevents those three pieces
+ * from drifting out of sync while the timing is tuned on hardware. */
+#define LOGO_IMPACT_WAIT_FRAMES       6  /* 0.1 second after END settles */
+#define LOGO_IMPACT_TRAVEL_FRAMES    21  /* 2x the 28/29 travel speed    */
+#define LOGO_IMPACT_STAGGER_FRAMES   10
+#define LOGO_IMPACT_BURST_FRAMES     22
+#define LOGO_IMPACT_CUBE_FLASH_FRAMES 4
+#define LOGO_IMPACT_EDGE_WAIT_FRAMES 18 /* 0.3 second after last burst   */
+#define LOGO_IMPACT_LAST_STAR         3
+#define LOGO_IMPACT_BARRAGE_END \
+	(LOGO_IMPACT_WAIT_FRAMES \
+	 + LOGO_IMPACT_LAST_STAR * LOGO_IMPACT_STAGGER_FRAMES \
+	 + LOGO_IMPACT_TRAVEL_FRAMES + LOGO_IMPACT_BURST_FRAMES)
+#define LOGO_IMPACT_CHASE_START \
+	(LOGO_IMPACT_BARRAGE_END + LOGO_IMPACT_EDGE_WAIT_FRAMES)
+#define LOGO_IMPACT_CHASE_FRAMES     90
+
 /* Small true-3D versions of the Space Cosmos glass cubes. The caller draws
  * these before the logo and xmbDrawIntroPSLogo() immediately reinstalls its
  * own projection afterwards, so this temporary GTE setup cannot disturb the
@@ -3229,7 +3247,7 @@ static PS_LOGO_SIZE_ATTR void drawLogoOrbitTrails(
 static PS_LOGO_SIZE_ATTR void drawLogoGlassSatellites(
 	RenderContext *ctx, GPUDMAChain *chain, int cx, int cy,
 	uint32_t frame, int count, int spread,
-	uint32_t starFrame, bool refractTrails
+	uint32_t starFrame, bool refractTrails, uint32_t impactSettledFrame
 ) {
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_OFX, cx << 16);
@@ -3255,38 +3273,56 @@ static PS_LOGO_SIZE_ATTR void drawLogoGlassSatellites(
 			half, frame * 9 + i * 830);
 	}
 
-	if (!refractTrails)
+	if (!refractTrails && !impactSettledFrame)
 		return;
 
 	/* Test the whole visible trail history, not merely the comet head. The
 	 * starfield remains screen-centred while these cube positions remain
 	 * logo-centred, so moving C cannot drag the stars along with it. */
-	int starCx = ctx->screenWidth / 2;
-	int starCy = ctx->screenHeight / 2;
 	setBlend(chain, GP0_BLEND_ADD);
-	for (int i = 0; i < count; i++) {
-		int reach = crad[i] + 15;
-		for (int s = 0; s < 5; s++) {
-			int best = 0;
-			for (int trail = 0; trail <= 8; trail++) {
-				int sampleTime = (int) starFrame - (56 * trail) / 8;
-				uint32_t sample = (sampleTime > 0)
-					? (uint32_t) sampleTime : 0;
-				int hx = starHeadX(s, starCx, sample);
-				int hy = starHeadY(s, starCy, sample);
-				int dx = hx - scx[i], dy = hy - scy[i];
-				int d2 = dx * dx + dy * dy;
-				if (d2 < reach * reach) {
-					int prox = 256 - d2 * 256 / (reach * reach);
-					if (prox > best) best = prox;
+	if (refractTrails) {
+		int starCx = ctx->screenWidth / 2;
+		int starCy = ctx->screenHeight / 2;
+		for (int i = 0; i < count; i++) {
+			int reach = crad[i] + 15;
+			for (int s = 0; s < 5; s++) {
+				int best = 0;
+				for (int trail = 0; trail <= 8; trail++) {
+					int sampleTime = (int) starFrame - (56 * trail) / 8;
+					uint32_t sample = (sampleTime > 0)
+						? (uint32_t) sampleTime : 0;
+					int hx = starHeadX(s, starCx, sample);
+					int hy = starHeadY(s, starCy, sample);
+					int dx = hx - scx[i], dy = hy - scy[i];
+					int d2 = dx * dx + dy * dy;
+					if (d2 < reach * reach) {
+						int prox = 256 - d2 * 256 / (reach * reach);
+						if (prox > best) best = prox;
+					}
+				}
+				if (best > 0) {
+					uint32_t c = scaleColor(
+						gp0_rgb(STARS[s].r, STARS[s].g, STARS[s].b), best);
+					nebulaBlob(chain, scx[i], scy[i], crad[i] + 7, c);
 				}
 			}
-			if (best > 0) {
-				uint32_t c = scaleColor(
-					gp0_rgb(STARS[s].r, STARS[s].g, STARS[s].b), best);
-				nebulaBlob(chain, scx[i], scy[i], crad[i] + 7, c);
-			}
 		}
+	}
+
+	/* Each added comet's blast lights all glass satellites for four frames—
+	 * intentionally about half the visible duration of a normal passing-trail
+	 * refraction. The flash uses that impact's own colour and never repeats. */
+	for (int star = 0; star <= LOGO_IMPACT_LAST_STAR; star++) {
+		int impactAt = LOGO_IMPACT_WAIT_FRAMES
+			+ star * LOGO_IMPACT_STAGGER_FRAMES
+			+ LOGO_IMPACT_TRAVEL_FRAMES;
+		int age = (int) impactSettledFrame - impactAt;
+		if (age < 0 || age >= LOGO_IMPACT_CUBE_FLASH_FRAMES)
+			continue;
+		int fade = 256 - age * 56;
+		uint32_t flash = scaleColor(logoRainbowColor(star), fade);
+		for (int i = 0; i < count; i++)
+			nebulaBlob(chain, scx[i], scy[i], crad[i] + 9, flash);
 	}
 }
 
@@ -3368,15 +3404,15 @@ static PS_LOGO_SIZE_ATTR void drawLogoPortal(
 		drawLogoOrbitTrails(chain, cx, cy, frame, 78, 54, 24, 32, 6);
 }
 
-/* Shared screen-edge comet used by both absorption modes. centerImpact makes
- * the projectile grow as it approaches the camera/logo centre, then keeps
- * its entire trail and firework behind C because this backdrop pass is
- * emitted before the mesh. */
+/* Shared screen-edge comet used by both absorption modes. fastImpact makes
+ * the projectile grow as it comes out of screen depth, but deliberately does
+ * not alter the four separate impact coordinates. Its entire trail and
+ * firework stay behind C because this backdrop pass is emitted first. */
 static PS_LOGO_SIZE_ATTR void drawLogoCometImpact(
 	GPUDMAChain *chain, int w, int h, int cx, int cy,
-	int star, int local, int travelFrames, bool centerImpact
+	int star, int local, int travelFrames, bool fastImpact
 ) {
-	const int burstFrames = 22;
+	const int burstFrames = LOGO_IMPACT_BURST_FRAMES;
 	if (local < 0 || local >= travelFrames + burstFrames)
 		return;
 
@@ -3388,9 +3424,15 @@ static PS_LOGO_SIZE_ATTR void drawLogoCometImpact(
 		case 3: sx = w - 8; sy = h - 26;    tx = cx + 42; ty = cy + 38; break;
 		default:sx = w / 2; sy = 6;         tx = cx;      ty = cy - 62; break;
 	}
-	if (centerImpact) {
-		tx = cx;
-		ty = cy + 5;
+	if (fastImpact) {
+		/* Separate regions in C's settled BIOS pose. All are behind the mesh:
+		 * red P bowl, blue S, yellow S, then the centre/teal S section. */
+		switch (star) {
+			case 0: tx = cx + 42; ty = cy - 20; break;
+			case 1: tx = cx + 50; ty = cy + 38; break;
+			case 2: tx = cx - 48; ty = cy + 44; break;
+			default:tx = cx +  2; ty = cy + 43; break;
+		}
 	}
 	uint32_t color = logoRainbowColor(star);
 	setBlend(chain, GP0_BLEND_ADD);
@@ -3414,9 +3456,9 @@ static PS_LOGO_SIZE_ATTR void drawLogoCometImpact(
 			shadedLine(chain, x0, y0, scaleColor(color, b0),
 				x1, y1, scaleColor(color, b1), true);
 			if (!seg) {
-				int head = centerImpact ? 5 + (ease * 10 >> 8) : 8;
+				int head = fastImpact ? 5 + (ease * 10 >> 8) : 8;
 				point(chain, x0, y0,
-					(centerImpact && ease > 150) ? 3 : 2, color, true);
+					(fastImpact && ease > 150) ? 3 : 2, color, true);
 				nebulaBlob(chain, x0, y0, head, scaleColor(color, 150));
 			}
 		}
@@ -3425,7 +3467,7 @@ static PS_LOGO_SIZE_ATTR void drawLogoCometImpact(
 
 	/* The comet is gone: only its absorbed contact energy expands outward. */
 	int life = local - travelFrames;
-	int radius = 4 + life * (centerImpact ? 4 : 3);
+	int radius = 4 + life * (fastImpact ? 4 : 3);
 	int fade = 256 - life * 10;
 	if (fade < 24) fade = 24;
 	nebulaBlob(chain, tx, ty, 12 + life,
@@ -3461,23 +3503,20 @@ static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
 		(int) (t % cycleFrames), travelFrames, false);
 }
 
-/* 29/29: four staggered comets travel in half the time used above. They all
- * disappear at the exact logo centre and only then emit their own firework.
- * A 30-frame quiet period begins whenever END is newly settled. */
+/* 29/29: four staggered comets travel in half the time used above, each to a
+ * different region behind the P/S. This is a one-shot sequence: a six-frame
+ * quiet period begins at END and no modulo timer can restart the barrage. */
 static PS_LOGO_SIZE_ATTR void drawLogoImpactBarrage(
 	GPUDMAChain *chain, int w, int h, int cx, int cy,
 	uint32_t settledFrame
 ) {
-	const int waitFrames = 30;
-	const int travelFrames = 21;
-	const int stagger = 10;
-	const int cycleFrames = 112;
-	if (settledFrame < waitFrames)
+	if (settledFrame < LOGO_IMPACT_WAIT_FRAMES)
 		return;
-	int t = (int) ((settledFrame - waitFrames) % cycleFrames);
-	for (int star = 0; star < 4; star++)
+	int t = (int) settledFrame - LOGO_IMPACT_WAIT_FRAMES;
+	for (int star = 0; star <= LOGO_IMPACT_LAST_STAR; star++)
 		drawLogoCometImpact(chain, w, h, cx, cy, star,
-			t - star * stagger, travelFrames, true);
+			t - star * LOGO_IMPACT_STAGGER_FRAMES,
+			LOGO_IMPACT_TRAVEL_FRAMES, true);
 }
 
 static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
@@ -3569,7 +3608,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			break;
 		case 18: /* only small, slow glass cube satellites */
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
-				6, 100, 0, false);
+				6, 100, 0, false, 0);
 			break;
 		case 19: /* screen-fixed cosmos plus widely orbiting logo cubes */
 			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
@@ -3578,7 +3617,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			drawStars(chain,
 				ctx->screenWidth / 2, ctx->screenHeight / 2, frame * 2);
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
-				6, 165, frame * 2, true);
+				6, 165, frame * 2, true, 0);
 			break;
 		case 20: /* tight comet halo */
 			nebulaBlob(chain, cx, cy + 5, 65, gp0_rgb(8, 18, 45));
@@ -3592,7 +3631,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			break;
 		case 22: /* crystalline orbit: glass chips and ice motes */
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
-				4, 100, 0, false);
+				4, 100, 0, false, 0);
 			drawLogoSpiralParticles(chain, cx, cy, frame,
 				gp0_rgb(155, 225, 255), 1);
 			break;
@@ -3613,7 +3652,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			drawNebulaMorph(chain,
 				ctx->screenWidth / 2, ctx->screenHeight / 2, frame);
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
-				6, 165, 0, false);
+				6, 165, 0, false, 0);
 			drawLogoAbsorption(chain, ctx->screenWidth, ctx->screenHeight,
 				cx, cy, settledFrame);
 			break;
@@ -3624,7 +3663,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			drawStars(chain,
 				ctx->screenWidth / 2, ctx->screenHeight / 2, frame * 2);
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
-				6, 165, frame * 2, true);
+				6, 165, frame * 2, true, settledFrame);
 			drawLogoImpactBarrage(chain,
 				ctx->screenWidth, ctx->screenHeight,
 				cx, cy, settledFrame);
@@ -3644,9 +3683,29 @@ void xmbDrawIntroPSLogo(
 	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT)
 		model = 0;
 
+	int logoAnim = (model == 2) ? anim : 0;
+	uint32_t logoAnimFrame = fxFrame;
+	int effectIndex = effect % PS_LOGO_EFFECT_COUNT;
+	if (effectIndex < 0)
+		effectIndex += PS_LOGO_EFFECT_COUNT;
+
 	if (model == 2)
 		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy,
 			fxFrame, settledFrame);
+
+	/* 29/29 owns one complete Edge Chase after its one-shot barrage. It
+	 * starts 0.3 seconds after the final firework ends and supplies a local
+	 * 0..89 clock, so case 17 performs exactly one sweep and cannot loop. */
+	if (model == 2 && effectIndex == 28) {
+		/* This effect owns its material timeline, so a previously selected L2
+		 * animation cannot make the embedded Edge Chase loop before/after it. */
+		logoAnim = 0;
+		if (settledFrame >= LOGO_IMPACT_CHASE_START
+		 && settledFrame < LOGO_IMPACT_CHASE_START + LOGO_IMPACT_CHASE_FRAMES) {
+			logoAnim = 17; /* L2 18/25 EDGE CHASE */
+			logoAnimFrame = settledFrame - LOGO_IMPACT_CHASE_START;
+		}
+	}
 
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
@@ -3705,7 +3764,7 @@ void xmbDrawIntroPSLogo(
 	drawPSLogoFaces(chain, introLogos[model].verts, introLogos[model].faces,
 		introLogos[model].faceCount, bright, shadeColors,
 		introLogos[model].edgeMask,
-		(model == 2) ? anim : 0, fxFrame, cx, cy);
+		logoAnim, logoAnimFrame, cx, cy);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------
