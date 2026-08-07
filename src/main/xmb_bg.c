@@ -2531,6 +2531,17 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
 #define PS_LOGO_OT_SIZE  256
 #define PS_LOGO_ANIM_COUNT 25
 
+/* Release builds use -O3 globally. On these deliberately loop-heavy visual
+ * helpers that causes GCC to inline and unroll several complete renderers
+ * into xmbDrawIntroPSLogo(), consuming over 12 KB of the PS1's 2 MB APP_RAM.
+ * Keep the effects as real calls and optimise their cold controller paths for
+ * size; the per-face renderer still does the same amount of GPU work. */
+#if defined(__GNUC__)
+#define PS_LOGO_SIZE_ATTR __attribute__((noinline, optimize("Os")))
+#else
+#define PS_LOGO_SIZE_ATTR
+#endif
+
 // Largest face count of any model drawn through drawPSLogoFaces().
 #define PS_LOGO_MAX2(a, b) (((a) > (b)) ? (a) : (b))
 #define PS_LOGO_MAX_FACES              \
@@ -2567,7 +2578,7 @@ static int psLogoBand(int value, int centre, int width, int peak) {
 	return (d >= width) ? 0 : ((width - d) * peak) / width;
 }
 
-static uint32_t psLogoAnimColor(
+static PS_LOGO_SIZE_ATTR uint32_t psLogoAnimColor(
 	int anim, uint32_t frame, int x, int y, int cx, int cy
 ) {
 	int dx = x - cx;
@@ -2737,7 +2748,7 @@ static uint32_t psLogoAnimColor(
 	return gp0_rgb((uint8_t) r, (uint8_t) g, (uint8_t) blue);
 }
 
-static void drawPSLogoAnimParticles(
+static PS_LOGO_SIZE_ATTR void drawPSLogoAnimParticles(
 	GPUDMAChain *chain, int anim, uint32_t frame, int cx, int cy
 ) {
 	if (anim != 15 && anim != 22 && anim != 23 && anim != 24)
@@ -2818,7 +2829,7 @@ static void drawPSLogoAnimParticles(
  * passed second so it lands innermost - see the note above on why the call
  * order looks backwards.
  */
-static void drawPSLogoFaces(
+static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 	GPUDMAChain *chain,
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
 	int bright, const uint8_t *shadeColors, const uint8_t *edgeMask,
@@ -3028,9 +3039,7 @@ static const struct {
 	 * eight times less able to enlarge the P and shrink the receding S.
 	 */
 	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT,
-	  8, 2, &psLogoBios3ShadeColors[0][0][0], psLogoBios3EdgeMask,
-	  PS_LOGO_BIOS3_SHADE_COUNT,
-	  psLogoBios3ShadeNames },
+	  8, 2, NULL, psLogoBios3EdgeMask, 1, NULL },
 };
 
 int xmbIntroPSLogoShadeCount(int model) {
@@ -3140,7 +3149,7 @@ const char *xmbIntroPSLogoAnimName(int model, int anim) {
 	return psLogoAnimNames[anim];
 }
 
-static void logoGlowColumn(
+static PS_LOGO_SIZE_ATTR void logoGlowColumn(
 	GPUDMAChain *chain, int cx, int cy, int radius, uint32_t color
 ) {
 	nebulaBlob(chain, cx, cy - 34, radius, scaleColor(color, 150));
@@ -3148,7 +3157,7 @@ static void logoGlowColumn(
 	nebulaBlob(chain, cx, cy + 38, radius, scaleColor(color, 150));
 }
 
-static void logoGlowRing(
+static PS_LOGO_SIZE_ATTR void logoGlowRing(
 	GPUDMAChain *chain, int cx, int cy, int rx, int ry, uint32_t color
 ) {
 	const int segments = 16;
@@ -3163,7 +3172,7 @@ static void logoGlowRing(
 	}
 }
 
-static uint32_t logoRainbowColor(int i) {
+static PS_LOGO_SIZE_ATTR uint32_t logoRainbowColor(int i) {
 	switch (i % 6) {
 		case 0: return gp0_rgb(255, 45, 35);
 		case 1: return gp0_rgb(255, 160, 25);
@@ -3177,7 +3186,7 @@ static uint32_t logoRainbowColor(int i) {
 /* Fast PS1-style comet ribbons which remain attached to the logo rather
  * than roaming across the whole screen. Every head is sampled backwards in
  * time, giving a genuine curved trail instead of a straight radial line. */
-static void drawLogoOrbitTrails(
+static PS_LOGO_SIZE_ATTR void drawLogoOrbitTrails(
 	GPUDMAChain *chain, int cx, int cy, uint32_t frame,
 	int rx, int ry, int speed, int trailSpan, int trailCount
 ) {
@@ -3215,7 +3224,7 @@ static void drawLogoOrbitTrails(
  * these before the logo and xmbDrawIntroPSLogo() immediately reinstalls its
  * own projection afterwards, so this temporary GTE setup cannot disturb the
  * approved C pose. */
-static void drawLogoGlassSatellites(
+static PS_LOGO_SIZE_ATTR void drawLogoGlassSatellites(
 	RenderContext *ctx, GPUDMAChain *chain, int cx, int cy,
 	uint32_t frame, int count
 ) {
@@ -3238,7 +3247,7 @@ static void drawLogoGlassSatellites(
 	}
 }
 
-static void drawLogoSpiralParticles(
+static PS_LOGO_SIZE_ATTR void drawLogoSpiralParticles(
 	GPUDMAChain *chain, int cx, int cy, uint32_t frame,
 	uint32_t color, int reverse
 ) {
@@ -3256,7 +3265,7 @@ static void drawLogoSpiralParticles(
 	}
 }
 
-static void drawLogoFireRing(
+static PS_LOGO_SIZE_ATTR void drawLogoFireRing(
 	GPUDMAChain *chain, int cx, int cy, uint32_t frame
 ) {
 	setBlend(chain, GP0_BLEND_ADD);
@@ -3274,7 +3283,7 @@ static void drawLogoFireRing(
 	logoGlowRing(chain, cx, cy + 7, 65, 48, gp0_rgb(110, 24, 2));
 }
 
-static void drawLogoElectricCross(
+static PS_LOGO_SIZE_ATTR void drawLogoElectricCross(
 	GPUDMAChain *chain, int cx, int cy, uint32_t frame
 ) {
 	setBlend(chain, GP0_BLEND_ADD);
@@ -3298,7 +3307,7 @@ static void drawLogoElectricCross(
 	}
 }
 
-static void drawLogoPortal(
+static PS_LOGO_SIZE_ATTR void drawLogoPortal(
 	GPUDMAChain *chain, int cx, int cy, uint32_t frame, bool rainbow
 ) {
 	int pulse = isin(((int) frame * 18) & (WAVE_FULL - 1)) * 5 >> 12;
@@ -3316,7 +3325,7 @@ static void drawLogoPortal(
 		drawLogoOrbitTrails(chain, cx, cy, frame, 78, 54, 24, 32, 6);
 }
 
-static void drawIntroLogoBackdrop(
+static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 	RenderContext *ctx, GPUDMAChain *chain,
 	int effect, int cx, int cy, uint32_t frame
 ) {

@@ -616,7 +616,7 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  */
 #define PS_LOGO_MODEL 1
 #define PS_LOGO_TUNE_MODEL 2  /* open the pose/effect tool directly on C */
-#define PS_LOGO_SHADE 14  /* R1 15/16: ALL MEDIUM, hardware-approved */
+#define PS_LOGO_SHADE 0   /* finalized hardware-approved ALL MEDIUM bake */
 #define PS_LOGO_EFFECT 0
 #define PS_LOGO_ANIM   0
 
