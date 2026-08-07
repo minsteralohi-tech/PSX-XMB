@@ -2731,10 +2731,16 @@ static const struct {
 	const PSLogoVertex *verts;
 	const PSLogoFace   *faces;
 	int                 faceCount;
+	int                 projectionScale;
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
-	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT  },
-	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT },
-	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT },
+	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT,  1 },
+	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT, 1 },
+	/*
+	 * C uses weak perspective. Multiplying H and TRZ by the same value keeps
+	 * the centre-plane size for a given CAM Z, while making depth variation
+	 * eight times less able to enlarge the P and shrink the receding S.
+	 */
+	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT, 8 },
 };
 
 void xmbDrawIntroPSLogo(
@@ -2750,13 +2756,29 @@ void xmbDrawIntroPSLogo(
 	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
 	gte_setControlReg(GTE_ZSF4, PS_LOGO_OT_SIZE / 4);
 
+	/*
+	 * The normal setup uses H=120 at 320x240. That is a wide perspective
+	 * projection, and moving a deep model close to make it large visibly
+	 * changes its proportions: the upright P grows while the ground-plane S
+	 * recedes and shrinks. C is the unwarped BIOS mesh, so render it with a
+	 * long lens / weak perspective instead. H and camera distance grow by the
+	 * same factor, preserving centre-plane scale and the pose tool's CAM Z
+	 * meaning while reducing perspective deformation.
+	 */
+	int projectionScale = introLogos[model].projectionScale;
+	if (projectionScale > 1) {
+		int focalLength = (ctx->screenWidth < ctx->screenHeight)
+			? ctx->screenWidth : ctx->screenHeight;
+		gte_setControlReg(GTE_H, (focalLength / 2) * projectionScale);
+	}
+
 	// setupCosmosGTE() centres OFX/OFY; override so the logo can sit where
 	// the BIOS puts it rather than at dead centre.
 	gte_setControlReg(GTE_OFX, cx << 16);
 	gte_setControlReg(GTE_OFY, cy << 16);
 	gte_setControlReg(GTE_TRX, 0);
 	gte_setControlReg(GTE_TRY, 0);
-	gte_setControlReg(GTE_TRZ, camZ);
+	gte_setControlReg(GTE_TRZ, camZ * projectionScale);
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
 
