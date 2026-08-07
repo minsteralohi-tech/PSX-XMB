@@ -2529,7 +2529,7 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
  * sort, so the extra buckets cost one pass over an array, not per-face work.
  */
 #define PS_LOGO_OT_SIZE  256
-#define PS_LOGO_ANIM_COUNT 14
+#define PS_LOGO_ANIM_COUNT 25
 
 // Largest face count of any model drawn through drawPSLogoFaces().
 #define PS_LOGO_MAX2(a, b) (((a) > (b)) ? (a) : (b))
@@ -2554,7 +2554,7 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
 // derived from the frame's own min/max - see drawPSLogoFaces().
 typedef struct {
 	uint32_t xy0, xy1, xy2;
-	uint8_t  r, g, b, pad;
+	uint8_t  r, g, b, edge;
 	int32_t  z;
 } PSLogoDrawFace;
 
@@ -2664,6 +2664,69 @@ static uint32_t psLogoAnimColor(
 			if (blue > 255) blue = 255;
 			break;
 		}
+		case 14: { /* real extrusion faces, hard-lit for one second */
+			phase = (int) (frame % 120);
+			if (phase < 60) {
+				int edge = (phase < 8) ? phase : ((phase > 51) ? 59 - phase : 8);
+				b = 24 + edge * 22;
+			}
+			r = b; g = b; blue = b;
+			break;
+		}
+		case 15: /* particles are emitted after the triangle pass */
+			break;
+		case 16: /* very soft full-material glow */
+			b = 5 + ((isin((int) (frame * 22) & (WAVE_FULL - 1))
+				+ WAVE_ONE) * 36 >> 13);
+			r = b * 11 / 16; g = b * 14 / 16; blue = b;
+			break;
+		case 17: /* bright point chasing around true rim surfaces */
+			phase = (int) (frame % 90);
+			centre = -185 + phase * 370 / 89;
+			b = psLogoBand(dx + dy, centre, 30, 210);
+			r = b; g = b * 14 / 16; blue = b * 10 / 16;
+			break;
+		case 18: /* crystalline fixed-point facet shimmer */
+			b = (isin((dx * 31 - dy * 19 + (int) frame * 45)
+				& (WAVE_FULL - 1)) + WAVE_ONE) * 68 >> 13;
+			r = b * 8 / 16; g = b * 13 / 16; blue = b;
+			break;
+		case 19: /* whole-logo colour breathing, channels out of phase */
+			r = (isin(((int) frame * 26) & (WAVE_FULL - 1)) + WAVE_ONE) * 38 >> 13;
+			g = (isin(((int) frame * 26 + 1365) & (WAVE_FULL - 1)) + WAVE_ONE) * 38 >> 13;
+			blue = (isin(((int) frame * 26 + 2730) & (WAVE_FULL - 1)) + WAVE_ONE) * 46 >> 13;
+			break;
+		case 20: /* narrow CRT-like scanline rising through the mesh */
+			phase = (int) (frame % 100);
+			centre = 105 - phase * 210 / 99;
+			b = psLogoBand(dy, centre, 10, 185);
+			r = b * 11 / 16; g = b * 15 / 16; blue = b;
+			break;
+		case 21: { /* one-second white flare, one-second recovery */
+			phase = (int) (frame % 120);
+			if (phase < 60) {
+				int d = psLogoAbs(phase - 30);
+				b = (30 - d) * 6;
+			}
+			r = b; g = b; blue = b;
+			break;
+		}
+		case 22: { /* expanding light shell, also outlined after this pass */
+			phase = (int) (frame % 90);
+			centre = phase * 120 / 89;
+			int radius = psLogoAbs(dx) + (psLogoAbs(dy) * 3) / 4;
+			b = psLogoBand(radius, centre, 13, 145);
+			r = b * 8 / 16; g = b * 14 / 16; blue = b;
+			break;
+		}
+		case 23: /* ember particles are emitted after the mesh */
+			break;
+		case 24: { /* sparse, deliberately pixel-stepped vertex twinkles */
+			int hash = (dx * 13 + dy * 7 + (int) frame * 31) & 63;
+			b = (hash < 5) ? (150 - hash * 20) : 0;
+			r = b; g = b; blue = b;
+			break;
+		}
 		default:
 			break;
 	}
@@ -2672,6 +2735,66 @@ static uint32_t psLogoAnimColor(
 	if (g > 255) g = 255;
 	if (blue > 255) blue = 255;
 	return gp0_rgb((uint8_t) r, (uint8_t) g, (uint8_t) blue);
+}
+
+static void drawPSLogoAnimParticles(
+	GPUDMAChain *chain, int anim, uint32_t frame, int cx, int cy
+) {
+	if (anim != 15 && anim != 22 && anim != 23 && anim != 24)
+		return;
+
+	setBlend(chain, GP0_BLEND_ADD);
+
+	if (anim == 15) {
+		/* Fast crystalline motes orbiting close to the silhouette. */
+		for (int i = 0; i < 22; i++) {
+			int a = ((int) frame * (24 + i % 5) + i * 487)
+				& (WAVE_FULL - 1);
+			int x = cx + (icos(a) * (58 + i % 4 * 7) >> 12);
+			int y = cy + 5 + (isin(a) * (42 + i % 3 * 6) >> 12);
+			int tw = 90
+				+ (((isin((a * 3) & (WAVE_FULL - 1)) + WAVE_ONE) * 100) >> 13);
+			uint32_t c = scaleColor(gp0_rgb(120, 205, 255), tw);
+			point(chain, x, y, (i % 5 == 0) ? 2 : 1, c, true);
+		}
+	} else if (anim == 22) {
+		/* Crisp expanding shockwave around the logo, synchronized with the
+		 * triangle-clipped radial light in psLogoAnimColor(). */
+		int phase = (int) (frame % 90);
+		int rx = 18 + phase * 82 / 89;
+		int ry = 12 + phase * 62 / 89;
+		int fade = 180 - phase * 130 / 89;
+		uint32_t c = scaleColor(gp0_rgb(90, 190, 255), fade);
+		int px = cx + rx, py = cy + 5;
+		for (int i = 1; i <= 16; i++) {
+			int a = i * (WAVE_FULL / 16) & (WAVE_FULL - 1);
+			int nx = cx + (icos(a) * rx >> 12);
+			int ny = cy + 5 + (isin(a) * ry >> 12);
+			shadedLine(chain, px, py, c, nx, ny, c, true);
+			px = nx; py = ny;
+		}
+	} else if (anim == 23) {
+		/* Orange/red embers rise from beneath the logo and drift sideways. */
+		for (int i = 0; i < 24; i++) {
+			int life = ((int) frame * (2 + i % 3) + i * 29) % 150;
+			int a = ((int) frame * 19 + i * 311) & (WAVE_FULL - 1);
+			int x = cx + (isin(a) * (32 + i % 5 * 8) >> 12);
+			int y = cy + 72 - life;
+			int fade = 230 - life;
+			uint32_t c = scaleColor(
+				(i & 1) ? gp0_rgb(255, 55, 6) : gp0_rgb(255, 145, 20), fade);
+			point(chain, x, y, (i % 7 == 0) ? 2 : 1, c, true);
+		}
+	} else { /* anim 24: independent star-like pixels around the logo */
+		for (int i = 0; i < 18; i++) {
+			int a = (i * 731 + (int) frame * (5 + i % 4)) & (WAVE_FULL - 1);
+			int x = cx + (icos(a) * (45 + (i * 17) % 55) >> 12);
+			int y = cy + 5 + (isin(a) * (30 + (i * 13) % 45) >> 12);
+			int tw = (isin((a * 5) & (WAVE_FULL - 1)) + WAVE_ONE) * 220 >> 13;
+			point(chain, x, y, (tw > 170) ? 2 : 1,
+				scaleColor(gp0_rgb(210, 225, 255), tw), true);
+		}
+	}
 }
 
 // Draws the PS logo model, spinning, at whatever camera/projection the
@@ -2698,7 +2821,7 @@ static uint32_t psLogoAnimColor(
 static void drawPSLogoFaces(
 	GPUDMAChain *chain,
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
-	int bright, const uint8_t *shadeColors,
+	int bright, const uint8_t *shadeColors, const uint8_t *edgeMask,
 	int anim, uint32_t fxFrame, int cx, int cy
 ) {
 	static PSLogoDrawFace drawFaces[PS_LOGO_MAX_FACES];
@@ -2751,6 +2874,7 @@ static void drawPSLogoFaces(
 		df->r   = (uint8_t) (((color ? color[0] : face->r) * bright) >> 8);
 		df->g   = (uint8_t) (((color ? color[1] : face->g) * bright) >> 8);
 		df->b   = (uint8_t) (((color ? color[2] : face->b) * bright) >> 8);
+		df->edge = edgeMask ? edgeMask[i] : 0;
 		df->z   = z;
 	}
 
@@ -2805,6 +2929,8 @@ static void drawPSLogoFaces(
 		setBlend(chain, GP0_BLEND_ADD);
 		for (int k = 0; k < ndraw; k++) {
 			const PSLogoDrawFace *df = &drawFaces[order[k]];
+			if ((anim == 14 || anim == 17) && !df->edge)
+				continue;
 			uint32_t xy[3] = { df->xy0, df->xy1, df->xy2 };
 			uint32_t color[3];
 			bool visible = false;
@@ -2827,6 +2953,7 @@ static void drawPSLogoFaces(
 			ptr[4] = color[2];
 			ptr[5] = xy[2];
 		}
+		drawPSLogoAnimParticles(chain, anim, fxFrame, cx, cy);
 		setBlend(chain, GP0_BLEND_SEMITRANS);
 	}
 }
@@ -2839,7 +2966,7 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 	cosmosRotate(0, 0, roll);
 
 	drawPSLogoFaces(chain, psLogoVertices, psLogoFaces,
-		PS_LOGO_FACE_COUNT, 256, NULL, 0, 0, 0, 0);
+		PS_LOGO_FACE_COUNT, 256, NULL, NULL, 0, 0, 0, 0);
 	return yaw;
 }
 
@@ -2887,20 +3014,22 @@ static const struct {
 	int                 projectionScale;
 	int                 coordinateScale;
 	const uint8_t      *shadeColors;
+	const uint8_t      *edgeMask;
 	int                 shadeCount;
 	const char *const  *shadeNames;
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
 	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT,
-	  1, 1, NULL, 1, NULL },
+	  1, 1, NULL, NULL, 1, NULL },
 	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT,
-	  1, 1, NULL, 1, NULL },
+	  1, 1, NULL, NULL, 1, NULL },
 	/*
 	 * C uses weak perspective. Multiplying H and TRZ by the same value keeps
 	 * the centre-plane size for a given CAM Z, while making depth variation
 	 * eight times less able to enlarge the P and shrink the receding S.
 	 */
 	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT,
-	  8, 2, &psLogoBios3ShadeColors[0][0][0], PS_LOGO_BIOS3_SHADE_COUNT,
+	  8, 2, &psLogoBios3ShadeColors[0][0][0], psLogoBios3EdgeMask,
+	  PS_LOGO_BIOS3_SHADE_COUNT,
 	  psLogoBios3ShadeNames },
 };
 
@@ -2926,7 +3055,7 @@ const char *xmbIntroPSLogoShadeName(int model, int shade) {
  * deliberately use untextured additive fans and lines: the same inexpensive
  * vocabulary used for save points, magic, portals and lens flares on the
  * original hardware. */
-#define PS_LOGO_EFFECT_COUNT 16
+#define PS_LOGO_EFFECT_COUNT 27
 static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"NONE",
 	"WHITE HALO",
@@ -2944,6 +3073,17 @@ static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"LOW DROP LIGHT",
 	"RGB PRISM",
 	"SHIFTING ORB",
+	"COSMOS 3D++",
+	"RGB ORBIT TRAILS",
+	"GLASS SATELLITES",
+	"COSMOS + GLASS",
+	"COMET HALO",
+	"SPIRAL PARTICLES",
+	"CRYSTAL ORBIT",
+	"FIRE RING",
+	"ELECTRIC CROSS",
+	"PORTAL SWIRL",
+	"RAINBOW VORTEX",
 };
 
 static const char *const psLogoAnimNames[PS_LOGO_ANIM_COUNT] = {
@@ -2961,6 +3101,17 @@ static const char *const psLogoAnimNames[PS_LOGO_ANIM_COUNT] = {
 	"NEON FLICKER",
 	"STAR GLINT",
 	"AURORA CROSS",
+	"EDGE FLASH",
+	"PARTICLE SPARKS",
+	"SOFT MATERIAL GLOW",
+	"EDGE CHASE",
+	"CRYSTAL FACETS",
+	"COLOR PULSE",
+	"SCANLINE RISE",
+	"WHITE FLARE",
+	"SHOCKWAVE",
+	"EMBER RISE",
+	"PIXEL TWINKLE",
 };
 
 int xmbIntroPSLogoEffectCount(int model) {
@@ -3012,8 +3163,162 @@ static void logoGlowRing(
 	}
 }
 
+static uint32_t logoRainbowColor(int i) {
+	switch (i % 6) {
+		case 0: return gp0_rgb(255, 45, 35);
+		case 1: return gp0_rgb(255, 160, 25);
+		case 2: return gp0_rgb(80, 235, 70);
+		case 3: return gp0_rgb(35, 220, 235);
+		case 4: return gp0_rgb(65, 95, 255);
+		default: return gp0_rgb(220, 55, 255);
+	}
+}
+
+/* Fast PS1-style comet ribbons which remain attached to the logo rather
+ * than roaming across the whole screen. Every head is sampled backwards in
+ * time, giving a genuine curved trail instead of a straight radial line. */
+static void drawLogoOrbitTrails(
+	GPUDMAChain *chain, int cx, int cy, uint32_t frame,
+	int rx, int ry, int speed, int trailSpan, int trailCount
+) {
+	const int segments = 8;
+	setBlend(chain, GP0_BLEND_ADD);
+	for (int i = 0; i < trailCount; i++) {
+		uint32_t base = logoRainbowColor(i);
+		int headX = cx, headY = cy;
+		for (int s = 0; s < segments; s++) {
+			int t0 = (int) frame - trailSpan * s / segments;
+			int t1 = (int) frame - trailSpan * (s + 1) / segments;
+			int a0 = (t0 * speed + i * (WAVE_FULL / trailCount))
+				& (WAVE_FULL - 1);
+			int a1 = (t1 * speed + i * (WAVE_FULL / trailCount))
+				& (WAVE_FULL - 1);
+			/* A small second harmonic keeps all six ribbons from tracing the
+			 * exact same ellipse and creates the lively PS1 magic-trail look. */
+			int x0 = cx + (icos(a0) * rx >> 12)
+				+ (icos((a0 * 2 + i * 333) & (WAVE_FULL - 1)) * 7 >> 12);
+			int y0 = cy + 5 + (isin(a0) * ry >> 12);
+			int x1 = cx + (icos(a1) * rx >> 12)
+				+ (icos((a1 * 2 + i * 333) & (WAVE_FULL - 1)) * 7 >> 12);
+			int y1 = cy + 5 + (isin(a1) * ry >> 12);
+			int b0 = 256 - 256 * s / segments;
+			int b1 = 256 - 256 * (s + 1) / segments;
+			shadedLine(chain, x0, y0, scaleColor(base, b0),
+				x1, y1, scaleColor(base, b1), true);
+			if (!s) { headX = x0; headY = y0; }
+		}
+		point(chain, headX, headY, 2, base, true);
+	}
+}
+
+/* Small true-3D versions of the Space Cosmos glass cubes. The caller draws
+ * these before the logo and xmbDrawIntroPSLogo() immediately reinstalls its
+ * own projection afterwards, so this temporary GTE setup cannot disturb the
+ * approved C pose. */
+static void drawLogoGlassSatellites(
+	RenderContext *ctx, GPUDMAChain *chain, int cx, int cy,
+	uint32_t frame, int count
+) {
+	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
+	gte_setControlReg(GTE_OFX, cx << 16);
+	gte_setControlReg(GTE_OFY, (cy + 5) << 16);
+	for (int i = 0; i < count; i++) {
+		int a = ((int) frame * (2 + (i & 1))
+			+ i * (WAVE_FULL / count)) & (WAVE_FULL - 1);
+		int orbit = 110 + (i % 3) * 20;
+		int wx = icos(a) * orbit >> 12;
+		int wy = isin(a) * (orbit * 3 / 5) >> 12;
+		int wz = 275 + (isin((a * 2 + i * 511) & (WAVE_FULL - 1)) * 35 >> 12);
+		int half = 10 + i % 3;
+		drawGlassCube(chain, wx, wy, wz,
+			(int) frame * 3 + i * 470,
+			(int) frame * 2 + i * 690,
+			(int) frame + i * 310,
+			half, frame * 9 + i * 830);
+	}
+}
+
+static void drawLogoSpiralParticles(
+	GPUDMAChain *chain, int cx, int cy, uint32_t frame,
+	uint32_t color, int reverse
+) {
+	setBlend(chain, GP0_BLEND_ADD);
+	for (int i = 0; i < 38; i++) {
+		int radius = 15 + (i * 72) / 37;
+		int direction = reverse ? -1 : 1;
+		int a = (direction * (int) frame * 20 + i * 241)
+			& (WAVE_FULL - 1);
+		int x = cx + (icos(a) * radius >> 12);
+		int y = cy + 5 + (isin(a) * (radius * 3 / 4) >> 12);
+		int fade = 245 - i * 175 / 37;
+		point(chain, x, y, (i % 11 == 0) ? 2 : 1,
+			scaleColor(color, fade), true);
+	}
+}
+
+static void drawLogoFireRing(
+	GPUDMAChain *chain, int cx, int cy, uint32_t frame
+) {
+	setBlend(chain, GP0_BLEND_ADD);
+	for (int i = 0; i < 28; i++) {
+		int a = (i * (WAVE_FULL / 28) + (int) frame * 7)
+			& (WAVE_FULL - 1);
+		int lick = 5 + ((isin((a * 5 + (int) frame * 31)
+			& (WAVE_FULL - 1)) + WAVE_ONE) * 7 >> 13);
+		int rx = 66 + lick, ry = 49 + lick / 2;
+		int x = cx + (icos(a) * rx >> 12);
+		int y = cy + 7 + (isin(a) * ry >> 12);
+		uint32_t c = (i & 1) ? gp0_rgb(255, 45, 4) : gp0_rgb(255, 145, 12);
+		point(chain, x, y, (i % 5 == 0) ? 3 : 2, c, true);
+	}
+	logoGlowRing(chain, cx, cy + 7, 65, 48, gp0_rgb(110, 24, 2));
+}
+
+static void drawLogoElectricCross(
+	GPUDMAChain *chain, int cx, int cy, uint32_t frame
+) {
+	setBlend(chain, GP0_BLEND_ADD);
+	uint32_t hot = gp0_rgb(190, 230, 255);
+	uint32_t cold = gp0_rgb(45, 80, 210);
+	for (int arm = 0; arm < 4; arm++) {
+		int a = arm * (WAVE_FULL / 4) + (int) frame * 3;
+		int px = cx, py = cy + 5;
+		for (int s = 1; s <= 7; s++) {
+			int r = 13 * s;
+			int jitter = isin(((int) frame * 47 + arm * 701 + s * 991)
+				& (WAVE_FULL - 1)) * 6 >> 12;
+			int nx = cx + (icos(a) * r >> 12)
+				+ (icos(a + WAVE_FULL / 4) * jitter >> 12);
+			int ny = cy + 5 + (isin(a) * r >> 12)
+				+ (isin(a + WAVE_FULL / 4) * jitter >> 12);
+			shadedLine(chain, px, py, (s == 1) ? hot : cold,
+				nx, ny, cold, true);
+			px = nx; py = ny;
+		}
+	}
+}
+
+static void drawLogoPortal(
+	GPUDMAChain *chain, int cx, int cy, uint32_t frame, bool rainbow
+) {
+	int pulse = isin(((int) frame * 18) & (WAVE_FULL - 1)) * 5 >> 12;
+	setBlend(chain, GP0_BLEND_ADD);
+	for (int r = 0; r < 4; r++) {
+		uint32_t c = rainbow ? logoRainbowColor(r + (frame / 12))
+			: ((r & 1) ? gp0_rgb(120, 35, 230) : gp0_rgb(25, 175, 235));
+		logoGlowRing(chain, cx, cy + 6,
+			48 + r * 11 + pulse, 35 + r * 8 + pulse / 2,
+			scaleColor(c, 190 - r * 26));
+	}
+	drawLogoSpiralParticles(chain, cx, cy, frame,
+		rainbow ? gp0_rgb(220, 220, 255) : gp0_rgb(90, 190, 255), 0);
+	if (rainbow)
+		drawLogoOrbitTrails(chain, cx, cy, frame, 78, 54, 24, 32, 6);
+}
+
 static void drawIntroLogoBackdrop(
-	GPUDMAChain *chain, int effect, int cx, int cy, uint32_t frame
+	RenderContext *ctx, GPUDMAChain *chain,
+	int effect, int cx, int cy, uint32_t frame
 ) {
 	effect %= PS_LOGO_EFFECT_COUNT;
 	if (effect <= 0)
@@ -3092,6 +3397,48 @@ static void drawIntroLogoBackdrop(
 			nebulaBlob(chain, x, y, 30, gp0_rgb(36, 58, 92));
 			break;
 		}
+		case 16: /* the complete existing Space Cosmos 3D++1 theme */
+			drawCosmos3DPlusPlus(ctx, chain);
+			break;
+		case 17: /* fast multicolour trails revolving around the logo */
+			drawLogoOrbitTrails(chain, cx, cy, frame, 73, 51, 30, 38, 6);
+			break;
+		case 18: /* only small, slow glass cube satellites */
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 6);
+			break;
+		case 19: /* compact cosmos centred on C plus true glass cubes */
+			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
+			drawNebulaMorph(chain, cx, cy + 5, frame);
+			drawStars(chain, cx, cy + 5, frame * 2);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 5);
+			break;
+		case 20: /* tight comet halo */
+			nebulaBlob(chain, cx, cy + 5, 65, gp0_rgb(8, 18, 45));
+			drawLogoOrbitTrails(chain, cx, cy, frame, 67, 47, 38, 54, 4);
+			break;
+		case 21: /* cyan spiral save-point particles */
+			drawLogoSpiralParticles(chain, cx, cy, frame,
+				gp0_rgb(55, 210, 255), 0);
+			drawLogoSpiralParticles(chain, cx, cy, frame + 70,
+				gp0_rgb(185, 65, 255), 1);
+			break;
+		case 22: /* crystalline orbit: glass chips and ice motes */
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 4);
+			drawLogoSpiralParticles(chain, cx, cy, frame,
+				gp0_rgb(155, 225, 255), 1);
+			break;
+		case 23: /* living orange/red fire perimeter */
+			drawLogoFireRing(chain, cx, cy, frame);
+			break;
+		case 24: /* four crackling lightning arms */
+			drawLogoElectricCross(chain, cx, cy, frame);
+			break;
+		case 25: /* cyan/violet magic portal */
+			drawLogoPortal(chain, cx, cy, frame, false);
+			break;
+		case 26: /* maximum-colour vortex */
+			drawLogoPortal(chain, cx, cy, frame, true);
+			break;
 	}
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
@@ -3108,7 +3455,7 @@ void xmbDrawIntroPSLogo(
 		model = 0;
 
 	if (model == 2)
-		drawIntroLogoBackdrop(chain, effect, cx, cy, fxFrame);
+		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy, fxFrame);
 
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
@@ -3166,6 +3513,7 @@ void xmbDrawIntroPSLogo(
 
 	drawPSLogoFaces(chain, introLogos[model].verts, introLogos[model].faces,
 		introLogos[model].faceCount, bright, shadeColors,
+		introLogos[model].edgeMask,
 		(model == 2) ? anim : 0, fxFrame, cx, cy);
 }
 
