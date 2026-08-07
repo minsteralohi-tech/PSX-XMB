@@ -198,81 +198,14 @@ MODELS = [
         # No artificial contour strips or screen-position gradients are used.
         "shadow_pose": (23.0, 8.0, 4.0),
         "blender_shadow": True,
+        # The temporary 16-way R1 comparison bank has served its purpose.
+        # Hardware testing selected 15/16 ALL MEDIUM, so bake that result
+        # directly into C's face colours instead of shipping 26,880 bytes of
+        # discarded alternatives in the PS1's very limited application RAM.
         "shadow_variants": [
-            {
-                "name": "BLENDER REF",
-                "light": (-0.55, -0.65, -0.52),
-                "ambient": 0.38, "inner_ao": 0.62,
-            },
-            {
-                "name": "UP LEFT",
-                "light": (-0.58, -0.58, -0.57),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "UP RIGHT",
-                "light": (0.58, -0.58, -0.57),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "DOWN LEFT",
-                "light": (-0.58, 0.58, -0.57),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "DOWN RIGHT",
-                "light": (0.58, 0.58, -0.57),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "LEFT SIDE",
-                "light": (-0.90, 0.0, -0.44),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "RIGHT SIDE",
-                "light": (0.90, 0.0, -0.44),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "TOP LIGHT",
-                "light": (0.0, -0.90, -0.44),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "BOTTOM LIGHT",
-                "light": (0.0, 0.90, -0.44),
-                "ambient": 0.38, "inner_ao": 0.65,
-            },
-            {
-                "name": "FRONT LIGHT",
-                "light": (0.0, 0.0, -1.0),
-                "ambient": 0.35, "inner_ao": 0.65,
-            },
-            {
-                "name": "BACK LIGHT",
-                "light": (0.0, 0.0, 1.0),
-                "ambient": 0.35, "inner_ao": 0.65,
-            },
-            {
-                "name": "INNER ONLY",
-                "shadow_scope": "inner", "uniform_factor": 0.35,
-            },
-            {
-                "name": "OUTER ONLY",
-                "shadow_scope": "outer", "uniform_factor": 0.45,
-            },
-            {
-                "name": "ALL SOFT",
-                "shadow_scope": "all", "uniform_factor": 0.72,
-            },
             {
                 "name": "ALL MEDIUM",
                 "shadow_scope": "all", "uniform_factor": 0.50,
-            },
-            {
-                "name": "ALL DEEP",
-                "shadow_scope": "all", "uniform_factor": 0.28,
             },
         ],
         # Four times the original 330-unit extent, and twice C's previous
