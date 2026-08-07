@@ -104,6 +104,7 @@ MODELS = [
         # Grow the swoosh (sub-meshes 1-3) about the P's centre
         "swoosh":     ([1, 2, 3], 0, 1.6),
         "swoosh_thin": 1.0,
+        "swoosh_erode": 0.0,
     },
     {
         "glb":        "playstation_logo_bios.glb",
@@ -134,6 +135,19 @@ MODELS = [
         # foreshortened. Matching what the eye sees means making the plates
         # numerically thinner than the P.
         "swoosh_thin": 0.7,
+        # Narrow the ribbon's STROKE without shrinking the S.
+        #
+        # The 1.6x enlargement above scaled the ribbon's stroke along with its
+        # footprint, leaving the S visibly fatter than the P's stem. Scaling
+        # back down would undo the enlargement, so instead every boundary
+        # vertex is pushed inward along its own rim normal - a real inward
+        # offset, which trims the stroke and leaves the S's size alone.
+        #
+        # 1.0 source units was picked by eye against the P's stem. An
+        # area-over-perimeter estimate suggested more than twice that, but it
+        # counts the ribbon's flat cut ends as perimeter and so badly
+        # under-reads the stroke; the render is the authority here.
+        "swoosh_erode": 1.0,
     },
 ]
 
@@ -234,6 +248,39 @@ def convert(spec, assets, models_dir):
                 v[a] = pivot[a] + (v[a] - pivot[a]) * factor
             verts[i] = tuple(v)
 
+    # Trim the ribbon's stroke by offsetting its boundary inward. Each rim
+    # face contributes its in-plane normal to its vertices; every vertex then
+    # moves against that averaged direction. See swoosh_erode above.
+    erode = spec["swoosh_erode"]
+    if erode > 0:
+        acc = {i: [0.0, 0.0] for i, o in enumerate(owner) if o in swoosh_meshes}
+
+        for v0, v1, v2, mi in faces:
+            if mi not in swoosh_meshes:
+                continue
+            a, b, c = verts[v0], verts[v1], verts[v2]
+            u = [b[k] - a[k] for k in range(3)]
+            w = [c[k] - a[k] for k in range(3)]
+            n = [u[1] * w[2] - u[2] * w[1],
+                 u[2] * w[0] - u[0] * w[2],
+                 u[0] * w[1] - u[1] * w[0]]
+            nl = math.sqrt(sum(t * t for t in n))
+            if nl < 1e-12:
+                continue
+            n = [t / nl for t in n]
+            if abs(n[1]) > 0.5:      # a flat face, not a rim
+                continue
+            for v in (v0, v1, v2):
+                acc[v][0] += n[0]
+                acc[v][1] += n[2]
+
+        for i, (dx, dz) in acc.items():
+            m = math.hypot(dx, dz)
+            if m < 1e-9:
+                continue
+            x, y, z = verts[i]
+            verts[i] = (x - erode * dx / m, y, z - erode * dz / m)
+
     # Thin the swoosh plates about their own mid-plane. See swoosh_thin above.
     thin = spec["swoosh_thin"]
     if thin != 1.0:
@@ -325,9 +372,10 @@ def convert(spec, assets, models_dir):
              u[2] * w[0] - u[0] * w[2],
              u[0] * w[1] - u[1] * w[0]]
         nl = math.sqrt(sum(t * t for t in n)) or 1.0
-        n = [t / nl for t in n]
-        if n[2] > 0:
-            n = [-t for t in n]
+        # NEGATED. The exported winding swap leaves this cross product pointing
+        # INTO the solid, so using it raw lights the side away from the light -
+        # which showed up as the shading landing on the wrong edge of the P.
+        n = [-t / nl for t in n]
 
         k = 1.0
         if abs(n[2]) < FLAT_DOT:
