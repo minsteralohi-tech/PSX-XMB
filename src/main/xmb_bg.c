@@ -30,6 +30,7 @@
 #include "main/xmb_bg.h"
 #include "main/model/ps_logo_model.h"
 #include "main/model/ps_logo_bios.h"
+#include "main/model/ps_logo_bios2.h"
 #include "ps1/cop0.h"
 #include "ps1/gte.h"
 #include "ps1/gpucmd.h"
@@ -2517,7 +2518,22 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
  * drawing at all first, same as the existing Cosmos 3D cubes above.
  */
 
-#define PS_LOGO_OT_SIZE 64   // depth buckets for the software painter's-algorithm sort
+/*
+ * Depth buckets for the software painter's-algorithm sort, and the size of
+ * the scratch arrays it needs.
+ *
+ * 256 rather than 64: the sort key is now rescaled to the frame's own depth
+ * range (see drawPSLogoFaces()), so every bucket earns its keep instead of
+ * the whole model piling into two or three of them. The sort is a counting
+ * sort, so the extra buckets cost one pass over an array, not per-face work.
+ */
+#define PS_LOGO_OT_SIZE  256
+
+// Largest face count of any model drawn through drawPSLogoFaces().
+#define PS_LOGO_MAX2(a, b) (((a) > (b)) ? (a) : (b))
+#define PS_LOGO_MAX_FACES              \
+	PS_LOGO_MAX2(PS_LOGO_FACE_COUNT,   \
+	PS_LOGO_MAX2(PS_LOGO_BIOS_FACE_COUNT, PS_LOGO_BIOS2_FACE_COUNT))
 
 // Confirmed by eye: 180 degrees. The geometry-based guess (0, i.e. no
 // tilt) was wrong - the model's own bounding box being tall-in-Y suggested
@@ -2525,17 +2541,18 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
 // Used by both the TEST logo theme and PS4 v2's corner copy.
 #define STAND_UP_ROLL 2048
 
-// Packed to 16 bytes (was 20 - int bucket and a pre-packed 32-bit colour
-// both cost more than they need to: PS_LOGO_OT_SIZE fits a uint8_t easily,
-// and reconstructing gp0_rgb() from 3 raw bytes at draw time is free next
-// to the GTE work already happening per face). 328 faces * 4 bytes saved
-// = 1312 bytes back from .bss - part of recovering the APP_RAM overflow
-// this project hit once the 3rd BGM track pushed total footprint over the
-// 2MB console's budget; see CMakeLists.txt/assets for the actual numbers.
+// Colour is kept as 3 raw bytes rather than a pre-packed 32-bit GP0 word:
+// reconstructing gp0_rgb() at draw time is free next to the GTE work already
+// happening per face, and .bss here is not free - this project overflowed
+// APP_RAM once the 3rd BGM track pushed total footprint over the 2MB
+// console's budget; see CMakeLists.txt/assets for the actual numbers.
+//
+// The depth is a full int32 and not a bucket index, because the bucket is now
+// derived from the frame's own min/max - see drawPSLogoFaces().
 typedef struct {
 	uint32_t xy0, xy1, xy2;
-	uint8_t  r, g, b;
-	uint8_t  bucket;
+	uint8_t  r, g, b, pad;
+	int32_t  z;
 } PSLogoDrawFace;
 
 // Draws the PS logo model, spinning, at whatever camera/projection the
@@ -2564,11 +2581,9 @@ static void drawPSLogoFaces(
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
 	int bright
 ) {
-	static PSLogoDrawFace drawFaces[
-		(PS_LOGO_FACE_COUNT > PS_LOGO_BIOS_FACE_COUNT)
-			? PS_LOGO_FACE_COUNT : PS_LOGO_BIOS_FACE_COUNT
-	];
+	static PSLogoDrawFace drawFaces[PS_LOGO_MAX_FACES];
 	int ndraw = 0;
+	int zMin = 0x7fffffff, zMax = -0x7fffffff;
 
 	for (int i = 0; i < faceCount; i++) {
 		const PSLogoFace *face = &faces[i];
@@ -2586,35 +2601,79 @@ static void drawPSLogoFaces(
 		uint32_t xy1 = gte_getDataReg(GTE_SXY1);
 		uint32_t xy2 = gte_getDataReg(GTE_SXY2);
 
+		/*
+		 * Depth key: AVSZ3's MAC0, NOT its OTZ.
+		 *
+		 * OTZ is MAC0 >> 12, and with ZSF3 = PS_LOGO_OT_SIZE/3 that shift
+		 * throws away almost everything this model needs. At the intro's
+		 * camera the whole logo spans a couple of hundred model units in
+		 * depth against a camera distance of ~430, so every face's OTZ lands
+		 * in about three of the sixty-four buckets. Faces that share a bucket
+		 * come out in array order, which is sub-mesh order, so the swoosh
+		 * painted over the P wherever they crossed - the stray yellow wedge
+		 * on the P's stem.
+		 *
+		 * MAC0 is the same quantity before the shift, so it keeps the
+		 * resolution. The range is rescaled to fit the buckets below, which
+		 * also makes this independent of camera distance and pose.
+		 */
 		gte_command(GTE_CMD_AVSZ3 | GTE_SF);
-		int bucket = (int) gte_getDataReg(GTE_OTZ);
-		if (bucket < 0) bucket = 0;
-		if (bucket >= PS_LOGO_OT_SIZE) bucket = PS_LOGO_OT_SIZE - 1;
+		int z = (int) gte_getDataReg(GTE_MAC0);
+
+		if (z < zMin) zMin = z;
+		if (z > zMax) zMax = z;
 
 		PSLogoDrawFace *df = &drawFaces[ndraw++];
-		df->xy0    = xy0;
-		df->xy1    = xy1;
-		df->xy2    = xy2;
-		df->r      = (uint8_t) ((face->r * bright) >> 8);
-		df->g      = (uint8_t) ((face->g * bright) >> 8);
-		df->b      = (uint8_t) ((face->b * bright) >> 8);
-		df->bucket = (uint8_t) bucket;
+		df->xy0 = xy0;
+		df->xy1 = xy1;
+		df->xy2 = xy2;
+		df->r   = (uint8_t) ((face->r * bright) >> 8);
+		df->g   = (uint8_t) ((face->g * bright) >> 8);
+		df->b   = (uint8_t) ((face->b * bright) >> 8);
+		df->z   = z;
 	}
 
-	// Far-to-near: highest bucket (furthest) first, matching the direction
-	// a real ordering table would be walked in.
-	for (int b = PS_LOGO_OT_SIZE - 1; b >= 0; b--) {
-		for (int i = 0; i < ndraw; i++) {
-			if (drawFaces[i].bucket != b)
-				continue;
+	if (!ndraw)
+		return;
 
-			uint32_t *ptr = allocateGP0Packet(chain, 4);
-			ptr[0] = gp0_rgb(drawFaces[i].r, drawFaces[i].g, drawFaces[i].b)
-				| gp0_shadedTriangle(false, false, false);
-			ptr[1] = drawFaces[i].xy0;
-			ptr[2] = drawFaces[i].xy1;
-			ptr[3] = drawFaces[i].xy2;
-		}
+	/*
+	 * Counting sort, far to near.
+	 *
+	 * The previous version rescanned the whole face array once per bucket -
+	 * fine at 64 buckets, quadratic as soon as there are enough buckets to be
+	 * useful. This is two linear passes plus the bucket histogram, so the
+	 * resolution is free.
+	 */
+	int shift = 0;
+	int range = zMax - zMin;
+
+	while ((range >> shift) >= PS_LOGO_OT_SIZE)
+		shift++;
+
+	static uint16_t counts[PS_LOGO_OT_SIZE + 1];
+	static uint16_t order[PS_LOGO_MAX_FACES];
+
+	for (int b = 0; b <= PS_LOGO_OT_SIZE; b++)
+		counts[b] = 0;
+
+	for (int i = 0; i < ndraw; i++)
+		counts[((zMax - drawFaces[i].z) >> shift) + 1]++;
+
+	for (int b = 0; b < PS_LOGO_OT_SIZE; b++)
+		counts[b + 1] += counts[b];
+
+	for (int i = 0; i < ndraw; i++)
+		order[counts[(zMax - drawFaces[i].z) >> shift]++] = (uint16_t) i;
+
+	for (int k = 0; k < ndraw; k++) {
+		const PSLogoDrawFace *df = &drawFaces[order[k]];
+
+		uint32_t *ptr = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_rgb(df->r, df->g, df->b)
+			| gp0_shadedTriangle(false, false, false);
+		ptr[1] = df->xy0;
+		ptr[2] = df->xy1;
+		ptr[3] = df->xy2;
 	}
 }
 
@@ -2650,11 +2709,36 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
  * innermost then pitch then roll - so yaw turns the logo on its own base, and
  * roll then tips the whole result in the screen plane.
  */
+/*
+ * The two candidate logo models, in menu order.
+ *
+ * A is the Sketchfab relief - a shallow extrusion of the flat artwork. B is
+ * the system-BIOS model, which is genuinely built the way the real screen's
+ * logo is: the P standing upright on a swoosh lying flat on the ground plane,
+ * rather than everything in one shallow slab.
+ */
+const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT] = {
+	"A relief",
+	"B system BIOS",
+};
+
+static const struct {
+	const PSLogoVertex *verts;
+	const PSLogoFace   *faces;
+	int                 faceCount;
+} introLogos[XMB_INTRO_LOGO_COUNT] = {
+	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT  },
+	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT },
+};
+
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ,
+	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
+
+	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT)
+		model = 0;
 
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
@@ -2680,8 +2764,8 @@ void xmbDrawIntroPSLogo(
 		cosmosRotate(0, 0, pitch & 4095);   /* slot 3 turns about X */
 	cosmosRotate(0, yaw & 4095, 0);         /* slot 2 turns about Y */
 
-	drawPSLogoFaces(chain,
-		psLogoBiosVertices, psLogoBiosFaces, PS_LOGO_BIOS_FACE_COUNT, bright);
+	drawPSLogoFaces(chain, introLogos[model].verts, introLogos[model].faces,
+		introLogos[model].faceCount, bright);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------

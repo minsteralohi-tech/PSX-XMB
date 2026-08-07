@@ -173,8 +173,16 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
  * poses live in one block above drawPsScreen(), and the pose tool on the boot
  * menu edits exactly those six numbers live.
  */
+/*
+ * Which of the two candidate logo models to draw. Both are converted from
+ * supplied GLBs and both are posed to the same on-screen size, so switching
+ * between them changes nothing else - the pose tool flips it live.
+ */
+#define XMB_INTRO_LOGO_COUNT 2
+extern const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT];
+
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ,
+	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright
 );
 

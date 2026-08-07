@@ -609,6 +609,13 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  */
 #define DEG(d) (((d) * 4096) / 360)
 
+/*
+ * Which logo model the sequence uses: 0 = the Sketchfab relief, 1 = the
+ * system-BIOS one. The pose tool switches this live so the two can be
+ * compared on hardware; this is just the value it starts from.
+ */
+#define PS_LOGO_MODEL 1
+
 #define PS_LOGO_START_YAW    193      /* arrives from behind, turning     */
 #define PS_LOGO_START_PITCH  -18      /* and slightly from below          */
 #define PS_LOGO_START_ROLL     0
@@ -667,7 +674,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		int inv  = 256 - k;
 		int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);   /* 0 -> 256 */
 
-		xmbDrawIntroPSLogo(ctx,
+		xmbDrawIntroPSLogo(ctx, PS_LOGO_MODEL,
 			poseLerp(PS_LOGO_START_X,     PS_LOGO_END_X,     ease),
 			poseLerp(PS_LOGO_START_Y,     PS_LOGO_END_Y,     ease),
 			poseLerp(PS_LOGO_START_CAM_Z, PS_LOGO_END_CAM_Z, ease),
@@ -759,6 +766,7 @@ static void tunePS1Logo(RenderContext *ctx) {
 	int which = 0;          /* 0 = START, 1 = END */
 	int sel   = 0;
 	int play  = -1;         /* frame of the preview, or -1 when not playing */
+	int model = PS_LOGO_MODEL;
 	bool sawRelease = false;
 	uint16_t last = 0;
 
@@ -778,6 +786,8 @@ static void tunePS1Logo(RenderContext *ctx) {
 				which ^= 1;
 			if (pressed & PAD_BTN_SQUARE)
 				play = 0;
+			if (pressed & PAD_BTN_L1)
+				model = (model + 1) % XMB_INTRO_LOGO_COUNT;
 			if (pressed & PAD_BTN_UP)
 				sel = (sel + POSE_FIELD_COUNT - 1) % POSE_FIELD_COUNT;
 			if (pressed & PAD_BTN_DOWN)
@@ -823,14 +833,15 @@ static void tunePS1Logo(RenderContext *ctx) {
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
 			0x000000, false);
 
-		xmbDrawIntroPSLogo(ctx,
+		xmbDrawIntroPSLogo(ctx, model,
 			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
 			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
 			DEG(shown[POSE_ROLL]), 256);
 
 		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
-		printString(ctx, 120, 8, 0x40c0ff,
+		printString(ctx, 104, 8, 0x40c0ff,
 			(play >= 0) ? "PREVIEW" : (which ? "END" : "START"));
+		printString(ctx, 168, 8, 0xc0c060, xmbIntroLogoNames[model]);
 
 		for (int i = 0; i < POSE_FIELD_COUNT; i++) {
 			char line[48];
@@ -846,7 +857,7 @@ static void tunePS1Logo(RenderContext *ctx) {
 			CH_PS1_SQUARE_BUTTON " preview   "
 			CH_PS1_CIRCLE_BUTTON " back");
 		printString(ctx, 8, 222, 0x707070,
-			"D-PAD pick/adjust   R1 x10");
+			"D-PAD pick/adjust   R1 x10   L1 model");
 
 		endFrame(ctx);
 	}
