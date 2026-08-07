@@ -170,8 +170,7 @@ MODELS = [
         "note":       "logo C - the newly supplied full-resolution BIOS model",
         # Preserve the newly supplied model's original proportions. In
         # particular, do NOT inherit B's 1.6x swoosh growth, ribbon erosion or
-        # plate thinning. C now keeps the source part placement as well, so no
-        # non-uniform geometry edit is applied to it.
+        # plate thinning.
         "mirror_z":   True,
         "bake_yaw":   -25.0,
         "bake_pitch":  12.0,
@@ -184,42 +183,39 @@ MODELS = [
         "swoosh":     ([0, 1, 3], 2, 1.0),
         "swoosh_thin": 1.0,
         "swoosh_erode": 0.0,
-        # Five intentionally different bakes for live comparison on hardware.
-        # R1 cycles them in C's pose tool; their order is generated into the
-        # model header along with the face-colour tables.
-        # The mask is evaluated in the current hardware comparison pose so
-        # "right" means visible screen-right, not an ambiguous mesh normal.
-        "shadow_pose": (24.0, 7.0, 3.0),
+        # Pull only the P a fraction toward the camera after normalisation.
+        # This does not lift or resize it; it only settles the painter's sort
+        # so the yellow plate cannot peek through the P's lower front edge.
+        "camera_forward": (2, 18.0),
+        # The annotated reference asks for narrow contour shadows, not a broad
+        # Lambert or screen-right gradient. Add a slim overlay strip to the
+        # specified front-cap boundaries of the P and along the S's lower
+        # outer contour. All five R1 choices use that exact path and vary only
+        # the darkness.
+        "trace_pose": (23.0, 8.0, 4.0),
+        "trace_shadow": True,
+        "trace_width": 6.0,
+        "trace_depth": 2.0,
         "shadow_variants": [
             {
-                "name": "RIGHT SOFT",
-                "screen_right_shadow": True,
-                "right_start": 0.68, "right_floor": 0.70,
-                "right_power": 1.5,
+                "name": "TRACE SOFT",
+                "trace_floor": 0.82,
             },
             {
-                "name": "RIGHT EDGE",
-                "screen_right_shadow": True,
-                "right_start": 0.76, "right_floor": 0.38,
-                "right_power": 1.0,
+                "name": "TRACE BIOS",
+                "trace_floor": 0.70,
             },
             {
-                "name": "RIGHT MEDIUM",
-                "screen_right_shadow": True,
-                "right_start": 0.58, "right_floor": 0.45,
-                "right_power": 1.2,
+                "name": "TRACE MEDIUM",
+                "trace_floor": 0.60,
             },
             {
-                "name": "RIGHT WIDE",
-                "screen_right_shadow": True,
-                "right_start": 0.42, "right_floor": 0.48,
-                "right_power": 1.4,
+                "name": "TRACE DARK",
+                "trace_floor": 0.50,
             },
             {
-                "name": "RIGHT DEEP",
-                "screen_right_shadow": True,
-                "right_start": 0.52, "right_floor": 0.28,
-                "right_power": 0.9,
+                "name": "TRACE DEEP",
+                "trace_floor": 0.38,
             },
         ],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
@@ -446,6 +442,223 @@ def convert(spec, assets, models_dir):
         k = target_extent / extent
         posed = [tuple(c * k for c in p) for p in posed]
 
+    # C's P and swoosh touch in depth. Move the P a tiny amount toward the
+    # camera after all normalisation so the painter's sort cannot let the
+    # yellow plate leak through its lower front edge. This is deliberately a
+    # depth-only separation; its vertical placement remains source-accurate.
+    camera_forward = spec.get("camera_forward")
+    if camera_forward:
+        forward_mesh, forward_amount = camera_forward
+        for i, mi in enumerate(owner):
+            if mi == forward_mesh:
+                x, y, z = posed[i]
+                posed[i] = (x, y, z - forward_amount)
+
+    # Face indices whose colours are controlled by C's five contour-shadow
+    # variants. The requested paths are not all visible side walls at this
+    # camera angle, so slim inset strips are added on the P and S front caps.
+    # This gives narrow, exact contours instead of darkening the large cap
+    # triangles that happen to have right-side centroids.
+    trace_faces = set()
+
+    if spec.get("trace_shadow"):
+        base_face_count = len(faces)
+        trace_yaw, trace_pitch, trace_roll = spec["trace_pose"]
+
+        def rotate_trace(p):
+            x, y, z = p
+            sy = math.sin(math.radians(trace_yaw))
+            cy = math.cos(math.radians(trace_yaw))
+            sp = math.sin(math.radians(trace_pitch))
+            cp = math.cos(math.radians(trace_pitch))
+            sr = math.sin(math.radians(trace_roll))
+            cr = math.cos(math.radians(trace_roll))
+            x1 = cy * x + sy * z
+            z1 = -sy * x + cy * z
+            y2 = cp * y - sp * z1
+            z2 = sp * y + cp * z1
+            return (cr * x1 - sr * y2, sr * x1 + cr * y2, z2)
+
+        def face_normal(points, face):
+            v0, v1, v2 = face[:3]
+            a, b, c = points[v0], points[v1], points[v2]
+            u = [b[k] - a[k] for k in range(3)]
+            w = [c[k] - a[k] for k in range(3)]
+            n = [u[1] * w[2] - u[2] * w[1],
+                 u[2] * w[0] - u[0] * w[2],
+                 u[0] * w[1] - u[1] * w[0]]
+            nl = math.sqrt(sum(t * t for t in n))
+            if nl < 1e-12:
+                return (0.0, 0.0, 0.0)
+            return tuple(t / nl for t in n)
+
+        def visible(face, view_points):
+            a, b, c = (view_points[face[i]] for i in range(3))
+            return ((b[0] - a[0]) * (c[1] - a[1])
+                    - (b[1] - a[1]) * (c[0] - a[0])) > 0
+
+        view = [rotate_trace(p) for p in posed]
+
+        swoosh_meshes = set(spec["swoosh"][0])
+
+        # Find the visible P cap's true polygon boundary. The supplied mesh's
+        # cap is normal to (1, 0, -1), while its extrusion walls are normal to
+        # that direction. Position-based edge keys join the duplicated GLB
+        # vertices before separating the exterior and hole outlines.
+        p_mesh = spec["shift"][0]
+        inv_sqrt2 = 1.0 / math.sqrt(2.0)
+        p_axis = (inv_sqrt2, 0.0, -inv_sqrt2)
+        p_cap_faces = []
+
+        for fi in range(base_face_count):
+            face = faces[fi]
+            if face[3] != p_mesh or not visible(face, view):
+                continue
+            n = face_normal(verts, face)
+            if abs(sum(n[k] * p_axis[k] for k in range(3))) > 0.9:
+                p_cap_faces.append(fi)
+
+        edge_faces = {}
+        for fi in p_cap_faces:
+            v0, v1, v2, _mi = faces[fi]
+            for edge in ((v0, v1), (v1, v2), (v2, v0)):
+                key = tuple(sorted(
+                    tuple(round(c, 3) for c in verts[v]) for v in edge
+                ))
+                edge_faces.setdefault(key, []).append((fi, edge))
+
+        cap_vertices = {v for fi in p_cap_faces for v in faces[fi][:3]}
+        px_lo = min(view[v][0] for v in cap_vertices)
+        px_hi = max(view[v][0] for v in cap_vertices)
+        py_lo = min(view[v][1] for v in cap_vertices)
+        py_hi = max(view[v][1] for v in cap_vertices)
+
+        # Convert a small toward-camera offset from the traced view back into
+        # the model's resting coordinate frame. It prevents coplanar overlap
+        # without changing the P's silhouette at any pose-tool angle.
+        depth = spec.get("trace_depth", 2.0)
+        sy = math.sin(math.radians(trace_yaw))
+        cy = math.cos(math.radians(trace_yaw))
+        sp = math.sin(math.radians(trace_pitch))
+        cp = math.cos(math.radians(trace_pitch))
+        sr = math.sin(math.radians(trace_roll))
+        cr = math.cos(math.radians(trace_roll))
+        dx, dy, dz = 0.0, 0.0, -depth
+        dx, dy = cr * dx + sr * dy, -sr * dx + cr * dy
+        dy, dz = cp * dy + sp * dz, -sp * dy + cp * dz
+        dx, dz = cy * dx - sy * dz, sy * dx + cy * dz
+        overlay_offset = (dx, dy, dz)
+        width = spec.get("trace_width", 0.075)
+
+        def add_trace_strip(fi, edge):
+            face = faces[fi]
+            strip_mesh = face[3]
+            a_index, b_index = edge
+            c_index = next(v for v in face[:3] if v not in edge)
+            a, b, c = posed[a_index], posed[b_index], posed[c_index]
+            edge_v = tuple(b[k] - a[k] for k in range(3))
+            cap_n = face_normal(posed, face)
+            inward = (cap_n[1] * edge_v[2] - cap_n[2] * edge_v[1],
+                      cap_n[2] * edge_v[0] - cap_n[0] * edge_v[2],
+                      cap_n[0] * edge_v[1] - cap_n[1] * edge_v[0])
+            midpoint = tuple((a[k] + b[k]) * 0.5 for k in range(3))
+            if sum(inward[k] * (c[k] - midpoint[k]) for k in range(3)) < 0:
+                inward = tuple(-t for t in inward)
+            inward_len = math.sqrt(sum(t * t for t in inward))
+            if inward_len < 1e-9:
+                return
+            inward = tuple(width * t / inward_len for t in inward)
+            inner_a = tuple(a[k] + inward[k] for k in range(3))
+            inner_b = tuple(b[k] + inward[k] for k in range(3))
+            quad = (a, b, inner_b, inner_a)
+            base = len(posed)
+            for p in quad:
+                posed.append(tuple(p[k] + overlay_offset[k]
+                                   for k in range(3)))
+                owner.append(strip_mesh)
+            faces.append((base, base + 1, base + 2, strip_mesh))
+            trace_faces.add(len(faces) - 1)
+            faces.append((base, base + 2, base + 3, strip_mesh))
+            trace_faces.add(len(faces) - 1)
+
+        for items in edge_faces.values():
+            if len(items) != 1:
+                continue
+            fi, edge = items[0]
+            xns = [(view[v][0] - px_lo) / max(1e-9, px_hi - px_lo)
+                   for v in edge]
+            yns = [(view[v][1] - py_lo) / max(1e-9, py_hi - py_lo)
+                   for v in edge]
+
+            # Test both endpoints, not only the midpoint. That rejects long
+            # triangulation seams which merely cross a traced region while
+            # retaining the short segments that actually follow its contour.
+            top_and_outer = min(xns) >= 0.10 and all(
+                yn <= 0.04 + 0.10 * xn + 0.10 * xn * xn * xn
+                for xn, yn in zip(xns, yns)
+            )
+            outer_curve = all(
+                0.10 <= yn <= 0.61
+                and xn >= (0.55 + 0.45 * math.sqrt(max(
+                    0.0, 1.0 - ((yn - 0.35) / 0.235) ** 2
+                ))) - 0.045
+                for xn, yn in zip(xns, yns)
+            )
+            inner_stem = (min(xns) >= 0.35 and max(xns) <= 0.47
+                          and min(yns) >= 0.27)
+            if top_and_outer or outer_curve or inner_stem:
+                add_trace_strip(fi, edge)
+
+        # The S trace follows its lower OUTER silhouette. Its coloured bands
+        # are separate meshes, so their shared cut edges are merged by source
+        # position first; only edges occurring once remain true contours. A
+        # sloping lower-envelope test follows the yellow-to-blue path drawn in
+        # the annotation and rejects the black inner slit above it.
+        s_cap_faces = []
+        for fi in range(base_face_count):
+            face = faces[fi]
+            if face[3] not in swoosh_meshes or not visible(face, view):
+                continue
+            if abs(face_normal(verts, face)[1]) > 0.9:
+                s_cap_faces.append(fi)
+
+        s_edge_faces = {}
+        for fi in s_cap_faces:
+            v0, v1, v2, _mi = faces[fi]
+            for edge in ((v0, v1), (v1, v2), (v2, v0)):
+                key = tuple(sorted(
+                    tuple(round(c, 3) for c in verts[v]) for v in edge
+                ))
+                s_edge_faces.setdefault(key, []).append((fi, edge))
+
+        s_cap_vertices = {v for fi in s_cap_faces for v in faces[fi][:3]}
+        sx_lo = min(view[v][0] for v in s_cap_vertices)
+        sx_hi = max(view[v][0] for v in s_cap_vertices)
+        sy_lo = min(view[v][1] for v in s_cap_vertices)
+        sy_hi = max(view[v][1] for v in s_cap_vertices)
+
+        for items in s_edge_faces.values():
+            if len(items) != 1:
+                continue
+            fi, edge = items[0]
+            edge_screen_x = [view[v][0] for v in edge]
+            stem_right = px_lo + 0.47 * (px_hi - px_lo)
+            if max(edge_screen_x) > px_lo and min(edge_screen_x) < stem_right:
+                # The P owns this screen interval. Its tiny forward offset
+                # handles the real mesh contact; do not lay an S contour strip
+                # across the red foot and recreate the yellow leak as an
+                # overlay.
+                continue
+            xns = [(view[v][0] - sx_lo) / max(1e-9, sx_hi - sx_lo)
+                   for v in edge]
+            yns = [(view[v][1] - sy_lo) / max(1e-9, sy_hi - sy_lo)
+                   for v in edge]
+            lower_outer = all(
+                yn >= 0.80 - 0.31 * xn for xn, yn in zip(xns, yns)
+            )
+            if lower_outer:
+                add_trace_strip(fi, edge)
+
     # Winding: the NCLIP swap and the Z mirror's handedness flip cancel out,
     # so a mirrored model is NOT swapped here. See points 2 and 5.
     swap = not spec["mirror_z"]
@@ -461,8 +674,12 @@ def convert(spec, assets, models_dir):
         " * script for what it bakes in and why.",
         " *",
         " * Baked in: the resting pose, the shift that stops the two parts",
-        " * intersecting, and winding to suit GTE_CMD_NCLIP. Colours are flat",
-        " * per sub-mesh - no shading. The intro only scales them for its fade.",
+        (" * intersecting, and winding to suit GTE_CMD_NCLIP. Base colours are"
+         if spec.get("trace_shadow") else
+         " * intersecting, and winding to suit GTE_CMD_NCLIP. Colours are flat"),
+        (" * flat per sub-mesh; optional tables carry prebaked contour shadows."
+         if spec.get("trace_shadow") else
+         " * per sub-mesh - no shading. The intro only scales them for its fade."),
         " */",
         "",
         '#include "main/model/ps_logo_model.h"',
@@ -524,7 +741,14 @@ def convert(spec, assets, models_dir):
                 screen_x.append(cr * x1 - sr * y2)
             screen_lo, screen_hi = min(screen_x), max(screen_x)
 
-        for v0, v1, v2, mi in faces:
+        for fi, (v0, v1, v2, mi) in enumerate(faces):
+            if cfg.get("trace_shadow"):
+                k = cfg.get("trace_floor", 0.7) if fi in trace_faces else 1.0
+                colors.append(tuple(
+                    min(255, round(ch * k)) for ch in spec["colors"][mi]
+                ))
+                continue
+
             if screen_right_shadow:
                 x = (screen_x[v0] + screen_x[v1] + screen_x[v2]) / 3
                 xn = (x - screen_lo) / max(1e-9, screen_hi - screen_lo)
