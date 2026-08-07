@@ -174,6 +174,11 @@ MODELS = [
         "mirror_z":   True,
         "bake_yaw":   -25.0,
         "bake_pitch":  12.0,
+        # C's raw triangles face the opposite way after the root correction
+        # and Z mirror. Keeping B's winding renders the far shell through the
+        # culled near shell: its silhouette remains plausible, but the visible
+        # extrusion stays on the left regardless of the light direction.
+        "swap_winding": True,
         "scale":       13.0,
         "colors":     [BIOS_REF_BLUE, BIOS_REF_TEAL,
                        BIOS_REF_RED, BIOS_REF_YELLOW],
@@ -200,24 +205,74 @@ MODELS = [
                 "ambient": 0.38, "inner_ao": 0.62,
             },
             {
-                "name": "SOFT RIMS",
-                "light": (-0.55, -0.65, -0.52),
-                "ambient": 0.56, "inner_ao": 0.72,
+                "name": "UP LEFT",
+                "light": (-0.58, -0.58, -0.57),
+                "ambient": 0.38, "inner_ao": 0.65,
             },
             {
-                "name": "TOP LEFT",
-                "light": (-0.72, -0.64, -0.27),
-                "ambient": 0.40, "inner_ao": 0.62,
+                "name": "UP RIGHT",
+                "light": (0.58, -0.58, -0.57),
+                "ambient": 0.38, "inner_ao": 0.65,
             },
             {
-                "name": "FRONT SOFT",
-                "light": (-0.34, -0.69, -0.64),
-                "ambient": 0.45, "inner_ao": 0.68,
+                "name": "DOWN LEFT",
+                "light": (-0.58, 0.58, -0.57),
+                "ambient": 0.38, "inner_ao": 0.65,
             },
             {
-                "name": "DEEP EDGES",
-                "light": (-0.55, -0.65, -0.52),
-                "ambient": 0.25, "inner_ao": 0.52,
+                "name": "DOWN RIGHT",
+                "light": (0.58, 0.58, -0.57),
+                "ambient": 0.38, "inner_ao": 0.65,
+            },
+            {
+                "name": "LEFT SIDE",
+                "light": (-0.90, 0.0, -0.44),
+                "ambient": 0.38, "inner_ao": 0.65,
+            },
+            {
+                "name": "RIGHT SIDE",
+                "light": (0.90, 0.0, -0.44),
+                "ambient": 0.38, "inner_ao": 0.65,
+            },
+            {
+                "name": "TOP LIGHT",
+                "light": (0.0, -0.90, -0.44),
+                "ambient": 0.38, "inner_ao": 0.65,
+            },
+            {
+                "name": "BOTTOM LIGHT",
+                "light": (0.0, 0.90, -0.44),
+                "ambient": 0.38, "inner_ao": 0.65,
+            },
+            {
+                "name": "FRONT LIGHT",
+                "light": (0.0, 0.0, -1.0),
+                "ambient": 0.35, "inner_ao": 0.65,
+            },
+            {
+                "name": "BACK LIGHT",
+                "light": (0.0, 0.0, 1.0),
+                "ambient": 0.35, "inner_ao": 0.65,
+            },
+            {
+                "name": "INNER ONLY",
+                "shadow_scope": "inner", "uniform_factor": 0.35,
+            },
+            {
+                "name": "OUTER ONLY",
+                "shadow_scope": "outer", "uniform_factor": 0.45,
+            },
+            {
+                "name": "ALL SOFT",
+                "shadow_scope": "all", "uniform_factor": 0.72,
+            },
+            {
+                "name": "ALL MEDIUM",
+                "shadow_scope": "all", "uniform_factor": 0.50,
+            },
+            {
+                "name": "ALL DEEP",
+                "shadow_scope": "all", "uniform_factor": 0.28,
             },
         ],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
@@ -417,7 +472,6 @@ def convert(spec, assets, models_dir):
              math.cos(math.radians(spec["bake_yaw"]))
     sp, cp = math.sin(math.radians(spec["bake_pitch"])), \
              math.cos(math.radians(spec["bake_pitch"]))
-
     posed = []
     for vx, vy, vz in verts:
         x =  (vx - ctr[0]) * spec["scale"]
@@ -661,9 +715,11 @@ def convert(spec, assets, models_dir):
             if lower_outer:
                 add_trace_strip(fi, edge)
 
-    # Winding: the NCLIP swap and the Z mirror's handedness flip cancel out,
-    # so a mirrored model is NOT swapped here. See points 2 and 5.
-    swap = not spec["mirror_z"]
+    # Winding: the NCLIP swap and the Z mirror's handedness flip normally
+    # cancel. C's source triangles are the exception and explicitly override
+    # this: otherwise NCLIP retains its far shell and exposes the extrusion on
+    # the opposite screen edge. See points 2 and 5.
+    swap = spec.get("swap_winding", not spec["mirror_z"])
 
     macro, prefix = spec["macro"], spec["prefix"]
     lines = [
@@ -807,24 +863,34 @@ def convert(spec, assets, models_dir):
                 k = 1.0
                 if cap_dot < 0.92:
                     n = tuple(-t for t in blender_view_normals[fi])
-                    lambert = max(0.0, sum(n[a] * light[a]
-                                           for a in range(3)))
-                    ambient = cfg.get("ambient", 0.4)
-                    k = ambient + (1.0 - ambient) * lambert
+                    fc = tuple(sum(blender_view[v][a]
+                                   for v in (v0, v1, v2)) / 3
+                               for a in range(3))
+                    radial = sum(
+                        n[a] * (fc[a] - blender_centers[mi][a])
+                        for a in range(3)
+                    )
+                    is_inner = radial > 0
+                    scope = cfg.get("shadow_scope", "all")
+                    should_shade = (scope == "all"
+                                    or (scope == "inner" and is_inner)
+                                    or (scope == "outer" and not is_inner))
 
-                    # The inner P cutout is naturally more occluded than its
-                    # outer silhouette. Detect it geometrically, rather than
-                    # by screen side, so the dark wall follows the full hole.
-                    if mi == spec["shift"][0]:
-                        fc = tuple(sum(blender_view[v][a]
-                                       for v in (v0, v1, v2)) / 3
-                                   for a in range(3))
-                        radial = sum(
-                            n[a] * (fc[a] - blender_centers[mi][a])
-                            for a in range(3)
-                        )
-                        if radial > 0:
-                            k *= cfg.get("inner_ao", 0.65)
+                    if should_shade:
+                        if "uniform_factor" in cfg:
+                            k = cfg["uniform_factor"]
+                        else:
+                            lambert = max(0.0, sum(
+                                n[a] * light[a] for a in range(3)
+                            ))
+                            ambient = cfg.get("ambient", 0.4)
+                            k = ambient + (1.0 - ambient) * lambert
+
+                            # The inner P cutout is naturally more occluded
+                            # than its outer silhouette. Detect it from the
+                            # mesh, not from an arbitrary screen side.
+                            if mi == spec["shift"][0] and is_inner:
+                                k *= cfg.get("inner_ao", 0.65)
 
                 colors.append(tuple(
                     min(255, max(0, round(ch * k)))
