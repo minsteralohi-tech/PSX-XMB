@@ -38,6 +38,11 @@ from PIL import Image
 FIELD = (168, 168, 168)
 INK   = ( 18,  45,  80)
 
+# The PlayStation screen is the other way round: white artwork on black. Its
+# one wordmark uses these instead.
+PS_FIELD = (0, 0, 0)
+PS_INK   = (255, 255, 255)
+
 LEVELS  = 15   # non-transparent palette entries; 15 + transparent = 16
 SUBSAMP = 6    # samples per axis inside each destination pixel
 
@@ -54,10 +59,17 @@ SUBSAMP = 6    # samples per axis inside each destination pixel
 # src/main/intro_ps1.c for why a short DMA transfer is fatal rather than
 # merely wrong.
 JOBS = [
-    ("orig_intro_sony.png",     "intro_sony.png",     115, 19, 128, 24),
-    ("orig_intro_computer.png", "intro_computer.png", 120, 11, 128, 16),
-    ("orig_intro_enter.png",    "intro_enter.png",    124, 10, 128, 16),
-    ("orig_intro_tm.png",       "intro_tm.png",        14,  7,  16, 16),
+    ("orig_intro_sony.png",     "intro_sony.png",     115, 19, 128, 24, FIELD, INK),
+    ("orig_intro_computer.png", "intro_computer.png", 120, 11, 128, 16, FIELD, INK),
+    ("orig_intro_enter.png",    "intro_enter.png",    124, 10, 128, 16, FIELD, INK),
+    ("orig_intro_tm.png",       "intro_tm.png",        14,  7,  16, 16, FIELD, INK),
+    # The PlayStation wordmark. Its master is still the original 80x18 bitmap,
+    # which is SMALLER than the target - there is no detail in it to recover,
+    # so this job is skipped with a warning until a proper high-resolution
+    # master is dropped in. Replace assets/orig_intro_pstext.png with one and
+    # re-run; then update PSTX_DW/PSTX_DH/PSTX_W/PSTX_H in
+    # src/main/intro_ps1.c to 97/18/112/24 to match.
+    ("orig_intro_pstext.png",   "intro_pstext.png",    97, 18, 112, 24, PS_FIELD, PS_INK),
 ]
 
 
@@ -79,7 +91,7 @@ def sample(mask, w, h, fx, fy):
     return acc
 
 
-def resample(src, dw, dh, pw, ph):
+def resample(src, dw, dh, pw, ph, field, ink):
     """Box-filter `src`'s alpha down to dw x dh, into a pw x ph RGBA image."""
     w, h = src.size
     mask = [a / 255.0 for a in src.convert("RGBA").getdata(3)]
@@ -108,7 +120,7 @@ def resample(src, dw, dh, pw, ph):
             # ramp, only a single semi-transparency bit, so the blend toward
             # the background has to be baked into the colour itself.
             px[x, y] = tuple(
-                round(f + (i - f) * level / LEVELS) for f, i in zip(FIELD, INK)
+                round(f + (i - f) * level / LEVELS) for f, i in zip(field, ink)
             ) + (255,)
 
     return out
@@ -118,13 +130,25 @@ def main():
     root   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(root, "assets")
 
-    for master, name, dw, dh, pw, ph in JOBS:
+    for master, name, dw, dh, pw, ph, field, ink in JOBS:
         path = os.path.join(assets, master)
         if not os.path.exists(path):
             sys.exit(f"missing master: {path}")
 
         with Image.open(path) as src:
-            out = resample(src, dw, dh, pw, ph)
+            # Downsampling a mask recovers antialiasing; upsampling one only
+            # blurs it. A master smaller than the target is a master that
+            # needs replacing, not converting - say so and leave the existing
+            # asset alone rather than making it worse.
+            if src.width < dw or src.height < dh:
+                print(
+                    f"{name}: SKIPPED - master is {src.width}x{src.height}, "
+                    f"smaller than the {dw}x{dh} target. Replace {master} "
+                    f"with a higher-resolution one."
+                )
+                continue
+
+            out = resample(src, dw, dh, pw, ph, field, ink)
 
         colors = len(set(out.getdata()))
         if colors > 16:
