@@ -48,9 +48,9 @@ extern "C" {
 #define PS1_BOOT_TEXTURES 1
 
 /*
- * Draw the PlayStation screen's logo as the real 3D model (ps_logo_model.h,
- * GTE-transformed, the same one the TEST logo theme uses) instead of the flat
- * intro_pslogo.png sprite, and swing it into place as it fades in.
+ * Draw the PlayStation screen's logo as a selectable full 3D model
+ * (ps_logo_bios*.h, GTE-transformed) instead of the flat intro_pslogo.png
+ * sprite, and swing it into place as it fades in.
  *
  * Set to 0 to go back to the sprite. Kept as a switch rather than deleting the
  * sprite path because the model's on-screen pose is tuned by eye - see the

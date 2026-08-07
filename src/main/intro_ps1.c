@@ -610,9 +610,9 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 #define DEG(d) (((d) * 4096) / 360)
 
 /*
- * Which logo model the sequence uses: 0 = the Sketchfab relief, 1 = the
- * system-BIOS one. The pose tool switches this live so the two can be
- * compared on hardware; this is just the value it starts from.
+ * Which logo model the sequence uses: 0 = Sketchfab relief, 1 = system BIOS,
+ * 2 = newly supplied full-resolution BIOS GLB. The pose tool cycles all three
+ * live for hardware comparison; this is just the value it starts from.
  */
 #define PS_LOGO_MODEL 1
 

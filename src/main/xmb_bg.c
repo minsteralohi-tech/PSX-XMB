@@ -31,6 +31,7 @@
 #include "main/model/ps_logo_model.h"
 #include "main/model/ps_logo_bios.h"
 #include "main/model/ps_logo_bios2.h"
+#include "main/model/ps_logo_bios3.h"
 #include "ps1/cop0.h"
 #include "ps1/gte.h"
 #include "ps1/gpucmd.h"
@@ -2533,7 +2534,8 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
 #define PS_LOGO_MAX2(a, b) (((a) > (b)) ? (a) : (b))
 #define PS_LOGO_MAX_FACES              \
 	PS_LOGO_MAX2(PS_LOGO_FACE_COUNT,   \
-	PS_LOGO_MAX2(PS_LOGO_BIOS_FACE_COUNT, PS_LOGO_BIOS2_FACE_COUNT))
+	PS_LOGO_MAX2(PS_LOGO_BIOS_FACE_COUNT, \
+	PS_LOGO_MAX2(PS_LOGO_BIOS2_FACE_COUNT, PS_LOGO_BIOS3_FACE_COUNT)))
 
 // Confirmed by eye: 180 degrees. The geometry-based guess (0, i.e. no
 // tilt) was wrong - the model's own bounding box being tall-in-Y suggested
@@ -2710,16 +2712,19 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
  * roll then tips the whole result in the screen plane.
  */
 /*
- * The two candidate logo models, in menu order.
+ * The three candidate logo models, in menu order.
  *
  * A is the Sketchfab relief - a shallow extrusion of the flat artwork. B is
  * the system-BIOS model, which is genuinely built the way the real screen's
  * logo is: the P standing upright on a swoosh lying flat on the ground plane,
- * rather than everything in one shallow slab.
+ * rather than everything in one shallow slab. C is the freshly supplied
+ * full-resolution BIOS GLB, kept separate so it can be tuned without changing
+ * the shipping B model.
  */
 const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT] = {
 	"A relief",
 	"B system BIOS",
+	"C new",
 };
 
 static const struct {
@@ -2729,6 +2734,7 @@ static const struct {
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
 	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT  },
 	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT },
+	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT },
 };
 
 void xmbDrawIntroPSLogo(
