@@ -98,7 +98,7 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 #define TM_H    16
 #define PSLG_W  96   /* padded; artwork is 90x82  */
 #define PSLG_H  88
-#define PSTX_W  80   /* padded; artwork is 80x18  */
+#define PSTX_W  96   /* padded; artwork is 96x21  */
 #define PSTX_H  24
 
 /*
@@ -122,8 +122,17 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 #define TM_DH     7
 #define PSLG_DW  90
 #define PSLG_DH  82
-#define PSTX_DW  80
-#define PSTX_DH  18
+/*
+ * The PlayStation wordmark was 80x18 and looked soft next to the dashboard's
+ * own hard-edged bitmap font on the same screen: at that width the logotype's
+ * strokes came out around two pixels, so most of the word was antialiasing
+ * rather than ink. 96 across is nearer what the BIOS shows and gives the
+ * letterforms enough pixels to be crisp; its master's aspect is preserved, and
+ * the generator hardens this one's edges (CONTRAST_HARD) where the SCE
+ * wordmarks stay linear.
+ */
+#define PSTX_DW  96
+#define PSTX_DH  21
 
 #define INTRO_VRAM_X 960
 #define SONY_VRAM_Y   64
