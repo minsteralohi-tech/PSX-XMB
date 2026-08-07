@@ -194,6 +194,9 @@ MODELS = [
         "light":       (0.6, -0.6, -0.53),
         "rim_base":    0.42,
         "shade_outer_only": True,
+        # The P is mesh 2. On that mesh the BIOS shadow belongs on the outer
+        # right bowl/curve, not the long outside-left wall of the stem.
+        "shade_right_only_meshes": [2],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
         # it does not alter C's original proportions.
         "target_extent": 660.0,
@@ -454,6 +457,7 @@ def convert(spec, assets, models_dir):
     flat_dot = spec.get("flat_dot", FLAT_DOT)
     rim_base = spec.get("rim_base", RIM_BASE)
     shade_outer_only = spec.get("shade_outer_only", False)
+    shade_right_only_meshes = spec.get("shade_right_only_meshes", [])
     ln = math.sqrt(sum(c * c for c in model_light))
     light = tuple(c / ln for c in model_light)
 
@@ -495,6 +499,12 @@ def convert(spec, assets, models_dir):
                     for a in range(3)
                 )
                 shade = radial < 0
+
+                # C's red P: keep its left stem wall at the full face colour
+                # and put the baked dark band only around the outside-right
+                # curve, matching the supplied BIOS capture.
+                if mi in shade_right_only_meshes:
+                    shade = shade and fc[0] > mesh_centers[mi][0]
 
             if shade:
                 lam = max(0.0, sum(p * q for p, q in zip(n, light)))
