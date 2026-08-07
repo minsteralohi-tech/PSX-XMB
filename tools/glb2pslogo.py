@@ -191,7 +191,7 @@ MODELS = [
         # Pull only the P a fraction toward the camera after normalisation.
         # This does not lift or resize it; it only settles the painter's sort
         # so the yellow plate cannot peek through the P's lower front edge.
-        "camera_forward": (2, 18.0),
+        "camera_forward": (2, 36.0),
         # Reproduce the Blender reference with the geometry's REAL extrusion
         # faces. Large P/S caps remain flat; only their side walls receive a
         # directional Lambert bake, with extra occlusion inside the P cutout.
@@ -275,9 +275,11 @@ MODELS = [
                 "shadow_scope": "all", "uniform_factor": 0.28,
             },
         ],
-        # Twice the previous 330-unit posed extent. This is a uniform scale;
-        # it does not alter C's original proportions.
-        "target_extent": 660.0,
+        # Four times the original 330-unit extent, and twice C's previous
+        # internal size. The runtime doubles camera depth with it, so the
+        # on-screen size is unchanged while vertex rounding has twice the
+        # precision. 1320 remains comfortably inside signed GTE coordinates.
+        "target_extent": 1320.0,
     },
 ]
 
