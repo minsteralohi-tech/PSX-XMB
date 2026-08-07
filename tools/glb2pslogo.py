@@ -43,27 +43,27 @@ WHAT THIS DOES BEYOND UNPACKING VERTICES
    sign convention. Swapping vertices 1 and 2 reconciles them - without it the
    logo renders inside out, showing only its back faces.
 
-5. Thickens each sub-mesh along its own thinnest axis. The source geometry is
-   a 2-unit-thick relief on a 72-unit-wide logo, which reads as a sticker; the
-   BIOS logo has a real extruded edge. The axis differs per part - the P is
-   thin in Z, the three swoosh slabs are thin in Y - so this finds each
-   sub-mesh's thinnest extent and scales about that sub-mesh's own mid-plane.
+5. Moves the P clear of the swoosh along Z.
 
-6. Bakes flat per-face shading, ON THE EXTRUDED EDGES ONLY. The faces are
-   drawn as flat GPU triangles with no lighting, so without something the
-   extruded sides are the same colour as the front and the whole thing reads
-   flat - but shading everything washes the front faces out and loses the
-   logo's flat-colour look.
+   THIS IS NOT COSMETIC. In the source the P occupies z 17.5..19.5, which is
+   INSIDE the yellow slab's 6.4..20.8 - the two parts genuinely interpenetrate.
+   xmb_bg.c draws this model with a software painter's algorithm, bucketing
+   whole faces by average depth, and no per-face sort can resolve intersecting
+   geometry: the yellow slab's large face lands in a nearer bucket than parts
+   of the red P it passes through, so the two tear into each other along the
+   intersection line. That is the glitch where red meets yellow.
 
-   So each face is classified first: its normal is compared against its own
-   sub-mesh's extrusion axis. Parallel means it is one of the two flat faces,
-   and it keeps its colour untouched. Perpendicular means it is an extruded
-   rim, and it gets one Lambert term against a fixed light. Roughly 119 of the
-   278 faces are flat.
+   Shifting the P past the slab's front face removes the intersection rather
+   than papering over it. The P reads as in front there anyway - which is what
+   the reference screen shows - so nothing is lost, and at this scale the
+   fraction of a pixel it moves is invisible.
 
-   Because it is baked in the resting pose, the lighting turns with the model
-   during the intro's swing-in rather than staying fixed in the world. At this
-   size and speed that is invisible, and it costs nothing at runtime.
+6. Leaves the geometry at its native thickness and applies NO shading. Both
+   were tried and both were worse: thickening turned the crisp logo into a
+   chunky one, and shading the extruded rims - even only the rims - muddied
+   what should read as flat colour. THICKNESS and SHADING below are kept so
+   either can be reintroduced by changing one value, but the shipped model is
+   the plain one.
 
 7. Replaces the materials' colours. The GLB's baseColorFactors are linear and
    convert to garishly bright sRGB; the flat PlayStation palette is what the
@@ -94,18 +94,21 @@ BAKE_PITCH =  28.0
 # with the intro's camera gives roughly 110 screen pixels.
 SCALE = 4.0
 
-# How much to multiply each sub-mesh's thinnest extent by. 2.6 takes the
-# source's 2-unit relief to ~5.2, which reads like the BIOS logo's extrusion.
-THICKNESS = 2.6
+# Source units to push the P forward by, clearing the yellow slab's front face
+# at z 20.8. Anything above ~1.3 works; 4 leaves margin without the gap
+# becoming measurable on screen. See point 5 above - this one is load-bearing.
+P_SHIFT = 4.0
 
-# Edge shading. LIGHT points from the surface toward the light, in the posed
-# frame: X right, Y DOWN (PS1 screen space), Z into the screen - so this is
-# above, left and in front.
-#
-# FLAT_DOT is the classifier: a face whose normal is within this much of its
-# sub-mesh's extrusion axis counts as one of the two flat faces and is left at
-# full colour. Everything else is an extruded rim and gets RIM_BASE plus
-# RIM_RANGE of Lambert.
+# Multiplies each sub-mesh's thinnest extent. 1.0 is the source's own
+# thickness, which is what ships. 2.6 gives a heavy BIOS-style extrusion.
+THICKNESS = 1.0
+
+# Rim shading, off. Set SHADING = True to bake it back in: LIGHT points from
+# the surface toward the light in the posed frame (X right, Y DOWN, Z into the
+# screen), FLAT_DOT classifies a face as one of the two flat faces when its
+# normal is that close to its sub-mesh's extrusion axis, and everything else
+# gets RIM_BASE plus RIM_RANGE of Lambert.
+SHADING   = False
 LIGHT     = (-0.35, -0.60, -0.72)
 FLAT_DOT  = 0.60
 RIM_BASE  = 0.50
@@ -177,6 +180,12 @@ def main():
                 base + idx[i], base + idx[i + 1], base + idx[i + 2],
                 prim["material"],
             ))
+
+    # Push the P (sub-mesh 0) clear of the swoosh. See point 5 above.
+    for i, o in enumerate(owner):
+        if o == 0:
+            x, y, z = verts[i]
+            verts[i] = (x, y, z + P_SHIFT)
 
     # Thicken: per sub-mesh, expand its own thinnest axis about its own
     # mid-plane. Done before centring so each part keeps its position. The
@@ -260,7 +269,7 @@ def main():
             n = [-t for t in n]
 
         ax = axis_dir[owner[v0]]
-        if abs(sum(p * q for p, q in zip(n, ax))) >= FLAT_DOT:
+        if not SHADING or abs(sum(p * q for p, q in zip(n, ax))) >= FLAT_DOT:
             k = 1.0                      # flat face - leave the colour alone
             flat_count += 1
         else:
@@ -283,6 +292,11 @@ def main():
         " * This is NOT the model in ps_logo_model.h. That one is an older,",
         " * coarser conversion still used by the TEST logo theme and PS4 v2;",
         " * this one is the real logo and is what the boot sequence draws.",
+        " *",
+        " * Baked in: the mirror correction, the resting pose, the depth shift",
+        " * that stops the P intersecting the swoosh, and winding to suit",
+        " * GTE_CMD_NCLIP. Colours are flat per material, no shading - the",
+        " * intro only scales them for its fade.",
         " */",
         "",
         '#include "main/model/ps_logo_model.h"',
