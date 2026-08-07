@@ -616,19 +616,20 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  */
 #define PS_LOGO_MODEL 1
 
-#define PS_LOGO_START_YAW    193      /* arrives from behind, turning     */
-#define PS_LOGO_START_PITCH  -18      /* and slightly from below          */
-#define PS_LOGO_START_ROLL     0
-#define PS_LOGO_START_CAM_Z  620      /* further away, so it moves toward */
+/* Dialled in on hardware with the pose tool - do not "tidy" these. */
+#define PS_LOGO_START_YAW    148      /* tumbling in, from far away       */
+#define PS_LOGO_START_PITCH  101
+#define PS_LOGO_START_ROLL    66
+#define PS_LOGO_START_CAM_Z 2320      /* distant, so it flies toward us   */
 #define PS_LOGO_START_X      160
 #define PS_LOGO_START_Y       80
 
-#define PS_LOGO_END_YAW        0      /* zero = the BIOS resting pose     */
-#define PS_LOGO_END_PITCH      0
-#define PS_LOGO_END_ROLL       0
-#define PS_LOGO_END_CAM_Z    430
-#define PS_LOGO_END_X        160
-#define PS_LOGO_END_Y         80
+#define PS_LOGO_END_YAW       29
+#define PS_LOGO_END_PITCH      1
+#define PS_LOGO_END_ROLL       4
+#define PS_LOGO_END_CAM_Z    410
+#define PS_LOGO_END_X        158
+#define PS_LOGO_END_Y         81
 
 /*
  * Frames the move takes, counted from T_PS_LOGO. Deliberately longer than the
