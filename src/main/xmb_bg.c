@@ -356,24 +356,25 @@ static void drawParallax(RenderContext *ctx, GPUDMAChain *chain) {
 
 /*
  * The Parallax Ribbons theme and the PS5 Sparkle theme's particles, both in
- * white, for the boot sequence's fourth variant.
+ * white, over the boot sequence's SCE field. `field` is that field's colour
+ * (0x00BBGGRR) and must be the intro's SCE_FIELD, or the ribbons will sit on a
+ * different grey than the wordmarks were antialiased against.
  *
  * The ribbons are the SAME four bands as drawParallax() above - same baseY,
  * amplitude, frequency, speed, height and segment count - and the sparkles are
  * the SAME thirty particles as drawPS5Sparkle(). Nothing about the motion is
- * re-derived; only the colours and the blend mode change, which is the only
- * honest way to say "the Parallax animation, in white".
+ * re-derived; only the colours change, which is the only honest way to say
+ * "the Parallax animation, in white".
  *
- * THE BLEND MODE IS THE WHOLE TRICK. Both originals sit on a near-black field
- * and use additive blending, so overlapping ribbons and bright sparkles glow.
- * Additive does nothing on white - it is already saturated. Subtractive is the
- * exact mirror: each ribbon takes light out of the white field instead of
- * adding it, overlaps get deeper rather than brighter, and a ribbon's fade to
- * black at its lower edge subtracts nothing and so fades back to the
- * background. Same picture, negated. Everything on screen therefore stays a
- * shade of white.
+ * The blend mode is additive, exactly as in both originals. That works here
+ * for the same reason it works there: the field is a mid grey, so there is
+ * headroom above it, and adding light makes each ribbon a WHITER shade of the
+ * background rather than a darker one. (An earlier version of this drew on a
+ * pure white field, where additive does nothing - white is already saturated -
+ * and had to subtract instead, which made everything greyer than the
+ * background. Matching the BIOS grey is what let it flip back.)
  */
-void xmbDrawWhiteRibbons(RenderContext *ctx) {
+void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 	int w = ctx->screenWidth;
 	int h = ctx->screenHeight;
@@ -383,35 +384,30 @@ void xmbDrawWhiteRibbons(RenderContext *ctx) {
 
 	uint32_t t = xmbFrame;
 
-	/* The field itself: white at the top, barely off-white at the bottom. */
+	/* The field itself, flat: the wordmarks are baked against exactly this. */
 	setBlend(chain, GP0_BLEND_SEMITRANS);
-	{
-		uint32_t top = gp0_rgb(255, 255, 255);
-		uint32_t bot = gp0_rgb(232, 232, 238);
-
-		gouraudQuad(chain,
-			0, 0, top,  w, 0, top,
-			0, h, bot,  w, h, bot,
-			false);
-	}
+	gouraudQuad(chain,
+		0, 0, field,  w, 0, field,
+		0, h, field,  w, h, field,
+		false);
 
 	/*
 	 * The four bands, byte-for-byte drawParallax()'s geometry. Only `color`
-	 * differs: it is now how much light each ribbon REMOVES, so a larger
-	 * number is a darker ribbon. The four values keep the original's
-	 * front-to-back separation - the two foreground bands are the strongest.
+	 * differs: it is now how much light each ribbon ADDS, so a larger number
+	 * is a whiter ribbon. The four values keep the original's front-to-back
+	 * separation - the two foreground bands are the strongest.
 	 */
 	Ribbon bands[4];
-	bands[0] = (Ribbon){ 120, 30, 40,  8, 70, gp0_rgb(28, 28, 30) };
-	bands[1] = (Ribbon){ 150, 44, 28, 12, 80, gp0_rgb(46, 46, 50) };
-	bands[2] = (Ribbon){ 180, 26, 60, 17, 60, gp0_rgb(20, 20, 22) };
-	bands[3] = (Ribbon){ 205, 38, 34, 22, 70, gp0_rgb(38, 38, 42) };
+	bands[0] = (Ribbon){ 120, 30, 40,  8, 70, gp0_rgb(38, 38, 36) };
+	bands[1] = (Ribbon){ 150, 44, 28, 12, 80, gp0_rgb(62, 62, 60) };
+	bands[2] = (Ribbon){ 180, 26, 60, 17, 60, gp0_rgb(26, 26, 25) };
+	bands[3] = (Ribbon){ 205, 38, 34, 22, 70, gp0_rgb(50, 50, 48) };
 
 	const int SEG = 16;
 	int step = w / SEG;
-	uint32_t none = gp0_rgb(0, 0, 0);   /* subtract nothing = background */
+	uint32_t none = gp0_rgb(0, 0, 0);   /* add nothing = background */
 
-	setBlend(chain, GP0_BLEND_SUBTRACT);
+	setBlend(chain, GP0_BLEND_ADD);
 
 	for (int r = 0; r < 4; r++) {
 		Ribbon *B = &bands[r];
@@ -434,8 +430,8 @@ void xmbDrawWhiteRibbons(RenderContext *ctx) {
 
 	/*
 	 * drawPS5Sparkle()'s particles: same count, same horizontal spread, same
-	 * upward drift and same twinkle. Subtracted rather than added, so they
-	 * read as flecks of grey rising through the white.
+	 * upward drift and same twinkle, in white rather than warm gold, so they
+	 * read as bright flecks rising through the grey.
 	 */
 	{
 		const int N = 30;
@@ -451,7 +447,7 @@ void xmbDrawWhiteRibbons(RenderContext *ctx) {
 				* 135 >> 12);
 			if (tw < 0) tw = 0;
 
-			uint32_t c = scaleColor(gp0_rgb(90, 90, 96), tw);
+			uint32_t c = scaleColor(gp0_rgb(96, 96, 92), tw);
 			int size = (i % 7 == 0) ? 3 : ((i % 3 == 0) ? 2 : 1);
 
 			point(chain, bx, y, size, c, true);
@@ -2549,11 +2545,24 @@ typedef struct {
 // different value to test an alternate tilt. Returns the current yaw angle
 // in raw units (0..4095) so callers that want the debug degree readout
 // don't have to recompute it themselves.
-static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
+/*
+ * As drawPSLogoModel() below, but at an explicit pose and brightness rather
+ * than a free-running spin at full brightness. `bright` is 0..256 and scales
+ * every face colour, which is how the boot intro fades the logo up out of
+ * black - the faces are flat-shaded, so scaling their colour IS the fade.
+ *
+ * `pitch` is applied between the spin and the stand-up tilt, so it tips the
+ * already-standing model toward or away from the camera without disturbing
+ * either. See the note above on why the call order looks backwards.
+ */
+static void drawPSLogoModelPose(
+	GPUDMAChain *chain, int yaw, int pitch, int roll, int bright
+) {
 	gte_setRotationMatrix(GTE_UNIT, 0, 0,  0, GTE_UNIT, 0,  0, 0, GTE_UNIT);
 
-	int yaw = (int) t * 8 & 4095;
 	cosmosRotate(0, yaw, 0);
+	if (pitch)
+		cosmosRotate(pitch, 0, 0);
 	cosmosRotate(0, 0, roll);
 
 	static PSLogoDrawFace drawFaces[PS_LOGO_FACE_COUNT];
@@ -2584,9 +2593,9 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 		df->xy0    = xy0;
 		df->xy1    = xy1;
 		df->xy2    = xy2;
-		df->r      = face->r;
-		df->g      = face->g;
-		df->b      = face->b;
+		df->r      = (uint8_t) ((face->r * bright) >> 8);
+		df->g      = (uint8_t) ((face->g * bright) >> 8);
+		df->b      = (uint8_t) ((face->b * bright) >> 8);
 		df->bucket = (uint8_t) bucket;
 	}
 
@@ -2605,8 +2614,53 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 			ptr[3] = drawFaces[i].xy2;
 		}
 	}
+}
 
+static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
+	int yaw = (int) t * 8 & 4095;
+
+	drawPSLogoModelPose(chain, yaw, 0, roll, 256);
 	return yaw;
+}
+
+/*
+ * The boot sequence's PlayStation screen draws the same model, but posed
+ * rather than free-spinning and positioned to match the BIOS screen.
+ *
+ * EVERY NUMBER THE CALLER PASSES IS MEANT TO BE TUNED BY EYE. Nothing here was
+ * or could be confirmed against hardware from the reference screenshots alone
+ * - see PS_LOGO_* in intro_ps1.c, which is where they live.
+ *
+ *   cx, cy   where the model's centre lands on screen, in pixels
+ *   camZ     camera distance; smaller is bigger. Projected height is
+ *            roughly H * 266 / camZ, and setupCosmosGTE() sets
+ *            H = min(w,h) / 2, so 120 at 320x240: camZ 300 gives ~106px.
+ *   bright   0..256, scales the flat face colours (the fade)
+ */
+void xmbDrawIntroPSLogo(
+	RenderContext *ctx, int cx, int cy, int camZ,
+	int yaw, int pitch, int roll, int bright
+) {
+	GPUDMAChain *chain = getCurrentChain(ctx);
+
+	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
+	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
+	gte_setControlReg(GTE_ZSF4, PS_LOGO_OT_SIZE / 4);
+
+	// setupCosmosGTE() centres OFX/OFY; override so the logo can sit where
+	// the BIOS puts it rather than at dead centre.
+	gte_setControlReg(GTE_OFX, cx << 16);
+	gte_setControlReg(GTE_OFY, cy << 16);
+	gte_setControlReg(GTE_TRX, 0);
+	gte_setControlReg(GTE_TRY, 0);
+	gte_setControlReg(GTE_TRZ, camZ);
+
+	setBlend(chain, GP0_BLEND_SEMITRANS);
+	drawPSLogoModelPose(chain, yaw & 4095, pitch, roll, bright);
+}
+
+int xmbGetPSLogoStandUpRoll(void) {
+	return STAND_UP_ROLL;
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------

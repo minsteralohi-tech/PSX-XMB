@@ -201,6 +201,26 @@ static void rotatePoint(int cx, int cy, int *x, int *y) {
  * together, which is the point: they are all laid out as percentages of it, so
  * the notches stay exactly where they belong.
  */
+/*
+ * The SCE screen's field colour.
+ *
+ * The real BIOS screen is not white - it is a flat mid grey, with the
+ * wordmarks in a dark navy rather than black. Both values are sampled off the
+ * reference screen.
+ *
+ * THIS MUST MATCH tools/make_intro_wordmarks.py's FIELD. The wordmarks'
+ * antialiasing is baked as opaque pixels ramping from the field colour to the
+ * ink, because the PS1 has no per-texel alpha; if the two disagree, every
+ * wordmark sits in a visible rectangle of the wrong grey.
+ *
+ * Two colours, because drawRect() wants 0xBBGGRR and the fade maths wants the
+ * channels separately.
+ */
+#define SCE_FIELD_R 168
+#define SCE_FIELD_G 168
+#define SCE_FIELD_B 168
+#define SCE_FIELD   ((SCE_FIELD_B << 16) | (SCE_FIELD_G << 8) | SCE_FIELD_R)
+
 #define SQ_CX   160
 #define SQ_CY   117
 #define SQW     256                  /* diamond half-width  = SQW / 4 = 64 */
@@ -282,13 +302,29 @@ static void sprite(
 	uint32_t *ptr = allocateGP0Packet(chain, 9);
 	ptr[0] = tint | gp0_shadedQuad(false, true, blend);
 	ptr[1] = gp0_xy(x, y);
+	/*
+	 * U/V span `w`, not `w - 1`, and that is not a typo.
+	 *
+	 * The quad covers w pixels, x .. x+w-1. With the w-1 idiom used elsewhere
+	 * in the project the GPU steps U by (w-1)/w per pixel, so the final pixel
+	 * lands on u+w-2 and the texture's LAST COLUMN IS NEVER SAMPLED. Most
+	 * sheets get away with it because their cells have a margin; these do not
+	 * - the artwork runs edge to edge. That missing column is why the
+	 * PlayStation wordmark rendered as "PlayStatior" with the final stem gone,
+	 * and why the PS logo lost its right edge.
+	 *
+	 * Safe here because every one of these textures is at most 128 texels
+	 * wide with a u base of 0, so u+w cannot reach the 256 wrap that the
+	 * planet renderer in xmb_bg.c had to dodge. The padding column it may
+	 * touch at the extreme right edge is transparent.
+	 */
 	ptr[2] = gp0_uv(tex->u, tex->v, tex->clut);
 	ptr[3] = gp0_xy(x + w, y);
-	ptr[4] = gp0_uv(tex->u + w - 1, tex->v, tex->page);
+	ptr[4] = gp0_uv(tex->u + w, tex->v, tex->page);
 	ptr[5] = gp0_xy(x, y + h);
-	ptr[6] = gp0_uv(tex->u, tex->v + h - 1, 0);
+	ptr[6] = gp0_uv(tex->u, tex->v + h, 0);
 	ptr[7] = gp0_xy(x + w, y + h);
-	ptr[8] = gp0_uv(tex->u + w - 1, tex->v + h - 1, 0);
+	ptr[8] = gp0_uv(tex->u + w, tex->v + h, 0);
 }
 
 /*
@@ -340,17 +376,18 @@ void setPS1IntroVariant(int variant) {
  *
  * So the art is now generated antialiased, by tools/make_intro_wordmarks.py
  * from the one-bit masters in assets/orig_intro_*.png. Coverage is quantised
- * to fifteen levels and baked into the CLUT as opaque greys ramping from the
- * screen's white down to the ink, with index 0 left transparent so the sprite
- * still has no background box. Sixteen entries exactly - the most 4bpp holds,
- * and all convertImage.py will accept.
+ * to fifteen levels and baked into the CLUT as opaque colours ramping from
+ * SCE_FIELD down to the ink, with index 0 left transparent so the sprite still
+ * has no background box. Sixteen entries exactly - the most 4bpp holds, and
+ * all convertImage.py will accept.
  *
  * Two consequences worth knowing:
  *
- *   - The ramp is baked against WHITE, because that is what the SCE screen is.
- *     Over the White Ribbons variant's field the edge pixels are therefore a
- *     touch lighter than their surroundings; that field is near-white, so it
- *     does not read.
+ *   - The ramp is baked against SCE_FIELD, because the PS1 has no per-texel
+ *     alpha to blend with at draw time. Change SCE_FIELD and the tool's FIELD
+ *     together or the wordmarks appear in boxes of the old colour. Over the
+ *     White Ribbons variant the edge pixels are a touch flatter than their
+ *     surroundings, which does not read at this size.
  *   - The texels are opaque (no STP bit), so the GPU ignores the blend flag on
  *     them and spriteFadeOnLight()'s repeated passes collapse into a single
  *     step. The wordmarks pop in rather than fading. That was already true of
@@ -421,18 +458,19 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
 
 	if (level > 0) {
-		// Fading a solid shape in on white: interpolate its colour from
-		// white toward the real one, which is smooth and costs nothing.
+		// Fading a solid shape in on the flat field: interpolate its colour
+		// from the field toward the real one, which is smooth and costs
+		// nothing.
 		uint32_t e = edge, c = centre;
 
 		if (level < 256) {
 			int k = level;
-			uint32_t er = ((edge        & 0xff) * k + 255 * (256 - k)) >> 8;
-			uint32_t eg = (((edge >> 8)  & 0xff) * k + 255 * (256 - k)) >> 8;
-			uint32_t eb = (((edge >> 16) & 0xff) * k + 255 * (256 - k)) >> 8;
-			uint32_t cr = ((centre        & 0xff) * k + 255 * (256 - k)) >> 8;
-			uint32_t cg = (((centre >> 8)  & 0xff) * k + 255 * (256 - k)) >> 8;
-			uint32_t cb = (((centre >> 16) & 0xff) * k + 255 * (256 - k)) >> 8;
+			uint32_t er = ((edge        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
+			uint32_t eg = (((edge >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
+			uint32_t eb = (((edge >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
+			uint32_t cr = ((centre        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
+			uint32_t cg = (((centre >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
+			uint32_t cb = (((centre >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
 			e = (eb << 16) | (eg << 8) | er;
 			c = (cb << 16) | (cg << 8) | cr;
 		}
@@ -530,7 +568,22 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	}
 }
 
-/* --- the PlayStation (black) screen ----------------------------------- */
+/* --- the PlayStation (black) screen -----------------------------------
+ *
+ * Placement of the 3D logo. All six are tuning knobs - see the note in
+ * drawPsScreen() - and all six are guesses from the reference screenshot,
+ * because the pose cannot be read off a still with any precision.
+ *
+ * CAM_Z 300: the model is 266 units tall (ps_logo_model.h, already scaled),
+ * setupCosmosGTE() sets H = min(w,h)/2 = 120 at 320x240, and projected height
+ * is roughly H * 266 / camZ - so 300 gives about 106 pixels, against the ~111
+ * the BIOS screen shows.
+ */
+#define PS_LOGO_CX     160
+#define PS_LOGO_CY      80
+#define PS_LOGO_CAM_Z  300
+#define PS_LOGO_PITCH  260     /* ~23 degrees, tipping the top toward us */
+#define PS_LOGO_SWING 1400     /* ~123 degrees of swing-in               */
 
 static void drawPsScreen(RenderContext *ctx, int frame) {
 	int logoLevel    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
@@ -545,10 +598,40 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		creditsLevel = (creditsLevel * out) >> 8;
 	}
 
-	// Bright artwork on black: scaling the vertex colour gives a genuinely
-	// smooth fade, because the GPU modulates every texel by it.
 	if (logoLevel > 0) {
-#if PS1_BOOT_TEXTURES
+#if PS1_BOOT_LOGO_3D
+		/*
+		 * The real model, GTE-transformed, rather than a flat sprite.
+		 *
+		 * It swings in: the logo starts turned away and rotates to face the
+		 * camera over the same window the old sprite faded in, easing to a
+		 * stop rather than snapping, and holds the BIOS pose for the rest of
+		 * the screen. The fade is the same ramp, applied to the flat face
+		 * colours instead of to a texture tint.
+		 *
+		 * EVERY CONSTANT BELOW IS A TUNING KNOB, and none of them could be
+		 * confirmed from the reference screenshots - they are a considered
+		 * starting point, not a measurement. Adjust and rebuild:
+		 *
+		 *   PS_LOGO_CX/CY   where the logo's centre sits
+		 *   PS_LOGO_CAM_Z   distance; smaller is bigger on screen
+		 *   PS_LOGO_PITCH   tips the top toward the camera, which is what
+		 *                   shows the top faces of the swoosh the way the
+		 *                   BIOS screen does
+		 *   PS_LOGO_SWING   how far round it starts, in 4096ths of a turn
+		 */
+		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
+		int ease = 256 - (((256 - k) * (256 - k)) >> 8);
+		int yaw  = (PS_LOGO_SWING * (256 - ease)) >> 8;
+
+		xmbDrawIntroPSLogo(ctx,
+			PS_LOGO_CX, PS_LOGO_CY, PS_LOGO_CAM_Z,
+			yaw, PS_LOGO_PITCH, xmbGetPSLogoStandUpRoll(),
+			clampi(logoLevel, 0, 256));
+#elif PS1_BOOT_TEXTURES
+		// The old flat sprite. Bright artwork on black: scaling the vertex
+		// colour gives a genuinely smooth fade, because the GPU modulates
+		// every texel by it.
 		uint32_t g = (uint32_t) clampi((logoLevel * 128) / 256, 0, 128);
 		uint32_t tint = (g << 16) | (g << 8) | g;
 
@@ -676,7 +759,7 @@ void runPS1Boot(RenderContext *ctx) {
 		bool white = frame < T_TO_BLACK;
 
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
-			white ? 0xffffff : 0x000000, false);
+			white ? SCE_FIELD : 0x000000, false);
 
 		/*
 		 * Variant 4 replaces the flat white field with the Parallax
@@ -688,7 +771,7 @@ void runPS1Boot(RenderContext *ctx) {
 		 * it and put it back.
 		 */
 		if (white && introVariant == PS1_INTRO_WHITE_RIBBONS)
-			xmbDrawWhiteRibbons(ctx);
+			xmbDrawIntroRibbons(ctx, SCE_FIELD);
 
 		if (white) {
 			int out = frame >= T_SCE_OUT

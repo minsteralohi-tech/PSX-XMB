@@ -144,13 +144,33 @@ void drawFlatBackdrop(RenderContext *ctx, uint32_t color);
 void drawXMBBackground(RenderContext *ctx);
 
 /*
- * The boot intro's white field: the Parallax Ribbons theme's four ribbons and
- * the PS5 Sparkle theme's rising particles, both drawn subtractively on white
- * so everything on screen stays a shade of white. Not offered in the theme
- * picker - it only makes sense on the intro's white SCE screen. Advances the
- * same animation clock drawXMBBackground() does. See xmb_bg.c.
+ * The boot intro's SCE field: the Parallax Ribbons theme's four ribbons and
+ * the PS5 Sparkle theme's rising particles, both drawn additively over `field`
+ * so everything on screen is a whiter shade of it. Pass the intro's SCE_FIELD.
+ * Not offered in the theme picker - it only makes sense on that screen.
+ * Advances the same animation clock drawXMBBackground() does. See xmb_bg.c.
  */
-void xmbDrawWhiteRibbons(RenderContext *ctx);
+void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
+
+/*
+ * The boot intro's PlayStation screen: the real GTE-transformed PS logo model
+ * (ps_logo_model.h - the same one the TEST logo theme and PS4 v2 draw), posed
+ * rather than free-spinning, so the intro can animate it into place.
+ *
+ * cx/cy is where the model's centre lands, camZ is the camera distance
+ * (smaller is bigger), yaw/pitch/roll are in the 4096-per-circle scale
+ * isin() uses, and bright is 0..256 scaling every face colour - which is how
+ * the logo fades up out of black, since the faces are flat-shaded.
+ *
+ * All of those are tuning knobs; the intro keeps its values in one block at
+ * the top of drawPsScreen(). xmbGetPSLogoStandUpRoll() returns the roll that
+ * stands the model upright facing the camera, which is the sane default.
+ */
+void xmbDrawIntroPSLogo(
+	RenderContext *ctx, int cx, int cy, int camZ,
+	int yaw, int pitch, int roll, int bright
+);
+int  xmbGetPSLogoStandUpRoll(void);
 
 /*
  * Advance the wave animation clock by extra frames, on top of the one frame

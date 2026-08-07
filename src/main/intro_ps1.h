@@ -48,6 +48,18 @@ extern "C" {
 #define PS1_BOOT_TEXTURES 1
 
 /*
+ * Draw the PlayStation screen's logo as the real 3D model (ps_logo_model.h,
+ * GTE-transformed, the same one the TEST logo theme uses) instead of the flat
+ * intro_pslogo.png sprite, and swing it into place as it fades in.
+ *
+ * Set to 0 to go back to the sprite. Kept as a switch rather than deleting the
+ * sprite path because the model's on-screen pose is tuned by eye - see the
+ * PS_LOGO_* constants in intro_ps1.c - and having the old look one rebuild
+ * away makes comparing them trivial.
+ */
+#define PS1_BOOT_LOGO_3D 1
+
+/*
  * Which look the SCE screen uses. A menu at boot picks one, so all three can
  * be compared on hardware from a single build - scaffolding for choosing a
  * direction, not a permanent feature.
