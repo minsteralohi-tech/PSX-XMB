@@ -3064,7 +3064,7 @@ const char *xmbIntroPSLogoShadeName(int model, int shade) {
  * deliberately use untextured additive fans and lines: the same inexpensive
  * vocabulary used for save points, magic, portals and lens flares on the
  * original hardware. */
-#define PS_LOGO_EFFECT_COUNT 28
+#define PS_LOGO_EFFECT_COUNT 29
 static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"NONE",
 	"WHITE HALO",
@@ -3094,6 +3094,7 @@ static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"PORTAL SWIRL",
 	"RAINBOW VORTEX",
 	"STAR ABSORPTION",
+	"COSMOS IMPACTS",
 };
 
 static const char *const psLogoAnimNames[PS_LOGO_ANIM_COUNT] = {
@@ -3367,24 +3368,18 @@ static PS_LOGO_SIZE_ATTR void drawLogoPortal(
 		drawLogoOrbitTrails(chain, cx, cy, frame, 78, 54, 24, 32, 6);
 }
 
-/* A single screen-edge comet at a time is pulled into a different point on
- * C's silhouette. The contact immediately changes into a short radial burst,
- * then the next colour starts. settledFrame is supplied by the intro/tool,
- * so the first comet cannot begin until the logo has genuinely stopped for
- * one full second. */
-static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
+/* Shared screen-edge comet used by both absorption modes. centerImpact makes
+ * the projectile grow as it approaches the camera/logo centre, then keeps
+ * its entire trail and firework behind C because this backdrop pass is
+ * emitted before the mesh. */
+static PS_LOGO_SIZE_ATTR void drawLogoCometImpact(
 	GPUDMAChain *chain, int w, int h, int cx, int cy,
-	uint32_t settledFrame
+	int star, int local, int travelFrames, bool centerImpact
 ) {
-	const int waitFrames = 60;
-	const int travelFrames = 42;
-	const int cycleFrames = 64;
-	if (settledFrame < waitFrames)
+	const int burstFrames = 22;
+	if (local < 0 || local >= travelFrames + burstFrames)
 		return;
 
-	uint32_t t = settledFrame - waitFrames;
-	int star = (int) ((t / cycleFrames) % 5);
-	int local = (int) (t % cycleFrames);
 	int sx, sy, tx, ty;
 	switch (star) {
 		case 0: sx = 8;     sy = h / 7;     tx = cx - 52; ty = cy - 8;  break;
@@ -3392,6 +3387,10 @@ static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
 		case 2: sx = 10;    sy = h - 18;    tx = cx - 38; ty = cy + 46; break;
 		case 3: sx = w - 8; sy = h - 26;    tx = cx + 42; ty = cy + 38; break;
 		default:sx = w / 2; sy = 6;         tx = cx;      ty = cy - 62; break;
+	}
+	if (centerImpact) {
+		tx = cx;
+		ty = cy + 5;
 	}
 	uint32_t color = logoRainbowColor(star);
 	setBlend(chain, GP0_BLEND_ADD);
@@ -3415,8 +3414,10 @@ static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
 			shadedLine(chain, x0, y0, scaleColor(color, b0),
 				x1, y1, scaleColor(color, b1), true);
 			if (!seg) {
-				point(chain, x0, y0, 2, color, true);
-				nebulaBlob(chain, x0, y0, 8, scaleColor(color, 150));
+				int head = centerImpact ? 5 + (ease * 10 >> 8) : 8;
+				point(chain, x0, y0,
+					(centerImpact && ease > 150) ? 3 : 2, color, true);
+				nebulaBlob(chain, x0, y0, head, scaleColor(color, 150));
 			}
 		}
 		return;
@@ -3424,7 +3425,7 @@ static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
 
 	/* The comet is gone: only its absorbed contact energy expands outward. */
 	int life = local - travelFrames;
-	int radius = 4 + life * 3;
+	int radius = 4 + life * (centerImpact ? 4 : 3);
 	int fade = 256 - life * 10;
 	if (fade < 24) fade = 24;
 	nebulaBlob(chain, tx, ty, 12 + life,
@@ -3442,6 +3443,41 @@ static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
 		if ((ray & 2) == 0)
 			point(chain, x1, y1, 1, scaleColor(color, fade), true);
 	}
+}
+
+/* 28/29: one comet at a time, touching five different silhouette points. */
+static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
+	GPUDMAChain *chain, int w, int h, int cx, int cy,
+	uint32_t settledFrame
+) {
+	const int waitFrames = 60;
+	const int travelFrames = 42;
+	const int cycleFrames = 64;
+	if (settledFrame < waitFrames)
+		return;
+	uint32_t t = settledFrame - waitFrames;
+	int star = (int) ((t / cycleFrames) % 5);
+	drawLogoCometImpact(chain, w, h, cx, cy, star,
+		(int) (t % cycleFrames), travelFrames, false);
+}
+
+/* 29/29: four staggered comets travel in half the time used above. They all
+ * disappear at the exact logo centre and only then emit their own firework.
+ * A 30-frame quiet period begins whenever END is newly settled. */
+static PS_LOGO_SIZE_ATTR void drawLogoImpactBarrage(
+	GPUDMAChain *chain, int w, int h, int cx, int cy,
+	uint32_t settledFrame
+) {
+	const int waitFrames = 30;
+	const int travelFrames = 21;
+	const int stagger = 10;
+	const int cycleFrames = 112;
+	if (settledFrame < waitFrames)
+		return;
+	int t = (int) ((settledFrame - waitFrames) % cycleFrames);
+	for (int star = 0; star < 4; star++)
+		drawLogoCometImpact(chain, w, h, cx, cy, star,
+			t - star * stagger, travelFrames, true);
 }
 
 static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
@@ -3579,6 +3615,18 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
 				6, 165, 0, false);
 			drawLogoAbsorption(chain, ctx->screenWidth, ctx->screenHeight,
+				cx, cy, settledFrame);
+			break;
+		case 28: /* Cosmos + Glass plus four fast behind-logo impacts */
+			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
+			drawNebulaMorph(chain,
+				ctx->screenWidth / 2, ctx->screenHeight / 2, frame);
+			drawStars(chain,
+				ctx->screenWidth / 2, ctx->screenHeight / 2, frame * 2);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
+				6, 165, frame * 2, true);
+			drawLogoImpactBarrage(chain,
+				ctx->screenWidth, ctx->screenHeight,
 				cx, cy, settledFrame);
 			break;
 	}
