@@ -144,6 +144,15 @@ void drawFlatBackdrop(RenderContext *ctx, uint32_t color);
 void drawXMBBackground(RenderContext *ctx);
 
 /*
+ * The boot intro's white field: the Parallax Ribbons theme's four ribbons and
+ * the PS5 Sparkle theme's rising particles, both drawn subtractively on white
+ * so everything on screen stays a shade of white. Not offered in the theme
+ * picker - it only makes sense on the intro's white SCE screen. Advances the
+ * same animation clock drawXMBBackground() does. See xmb_bg.c.
+ */
+void xmbDrawWhiteRibbons(RenderContext *ctx);
+
+/*
  * Advance the wave animation clock by extra frames, on top of the one frame
  * drawXMBBackground() already adds. Used by the boot intro to speed the
  * waves up; every wave layer is a function of that clock, so this is all the

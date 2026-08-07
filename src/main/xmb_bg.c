@@ -352,6 +352,115 @@ static void drawParallax(RenderContext *ctx, GPUDMAChain *chain) {
 	setBlend(chain, GP0_BLEND_SEMITRANS);
 }
 
+/* --- white ribbon field, for the boot intro ----------------------------- */
+
+/*
+ * The Parallax Ribbons theme and the PS5 Sparkle theme's particles, both in
+ * white, for the boot sequence's fourth variant.
+ *
+ * The ribbons are the SAME four bands as drawParallax() above - same baseY,
+ * amplitude, frequency, speed, height and segment count - and the sparkles are
+ * the SAME thirty particles as drawPS5Sparkle(). Nothing about the motion is
+ * re-derived; only the colours and the blend mode change, which is the only
+ * honest way to say "the Parallax animation, in white".
+ *
+ * THE BLEND MODE IS THE WHOLE TRICK. Both originals sit on a near-black field
+ * and use additive blending, so overlapping ribbons and bright sparkles glow.
+ * Additive does nothing on white - it is already saturated. Subtractive is the
+ * exact mirror: each ribbon takes light out of the white field instead of
+ * adding it, overlaps get deeper rather than brighter, and a ribbon's fade to
+ * black at its lower edge subtracts nothing and so fades back to the
+ * background. Same picture, negated. Everything on screen therefore stays a
+ * shade of white.
+ */
+void xmbDrawWhiteRibbons(RenderContext *ctx) {
+	GPUDMAChain *chain = getCurrentChain(ctx);
+	int w = ctx->screenWidth;
+	int h = ctx->screenHeight;
+
+	if (isBackgroundScrollEnabled())
+		xmbFrame++;
+
+	uint32_t t = xmbFrame;
+
+	/* The field itself: white at the top, barely off-white at the bottom. */
+	setBlend(chain, GP0_BLEND_SEMITRANS);
+	{
+		uint32_t top = gp0_rgb(255, 255, 255);
+		uint32_t bot = gp0_rgb(232, 232, 238);
+
+		gouraudQuad(chain,
+			0, 0, top,  w, 0, top,
+			0, h, bot,  w, h, bot,
+			false);
+	}
+
+	/*
+	 * The four bands, byte-for-byte drawParallax()'s geometry. Only `color`
+	 * differs: it is now how much light each ribbon REMOVES, so a larger
+	 * number is a darker ribbon. The four values keep the original's
+	 * front-to-back separation - the two foreground bands are the strongest.
+	 */
+	Ribbon bands[4];
+	bands[0] = (Ribbon){ 120, 30, 40,  8, 70, gp0_rgb(28, 28, 30) };
+	bands[1] = (Ribbon){ 150, 44, 28, 12, 80, gp0_rgb(46, 46, 50) };
+	bands[2] = (Ribbon){ 180, 26, 60, 17, 60, gp0_rgb(20, 20, 22) };
+	bands[3] = (Ribbon){ 205, 38, 34, 22, 70, gp0_rgb(38, 38, 42) };
+
+	const int SEG = 16;
+	int step = w / SEG;
+	uint32_t none = gp0_rgb(0, 0, 0);   /* subtract nothing = background */
+
+	setBlend(chain, GP0_BLEND_SUBTRACT);
+
+	for (int r = 0; r < 4; r++) {
+		Ribbon *B = &bands[r];
+
+		for (int i = 0; i < SEG; i++) {
+			int x0 = i * step;
+			int x1 = (i == SEG - 1) ? w : (i + 1) * step;
+
+			int a0 = (i       * B->freq + t * B->speed) & (WAVE_FULL - 1);
+			int a1 = ((i + 1) * B->freq + t * B->speed) & (WAVE_FULL - 1);
+			int y0 = B->baseY + (isin(a0) * B->amp >> 12);
+			int y1 = B->baseY + (isin(a1) * B->amp >> 12);
+
+			gouraudQuad(chain,
+				x0, y0,             B->color, x1, y1,             B->color,
+				x0, y0 + B->height, none,     x1, y1 + B->height, none,
+				true);
+		}
+	}
+
+	/*
+	 * drawPS5Sparkle()'s particles: same count, same horizontal spread, same
+	 * upward drift and same twinkle. Subtracted rather than added, so they
+	 * read as flecks of grey rising through the white.
+	 */
+	{
+		const int N = 30;
+		int period = h + 40;
+
+		for (int i = 0; i < N; i++) {
+			int bx = (i * 79) % w
+				+ (isin((t * 2 + i * 130) & (WAVE_FULL - 1)) * 4 >> 12);
+			int drift = ((int) t * (1 + (i % 3)) + i * 47) % period;
+			int y  = h - drift;
+
+			int tw = 120 + (isin((t * (4 + (i % 5)) + i * 211) & (WAVE_FULL - 1))
+				* 135 >> 12);
+			if (tw < 0) tw = 0;
+
+			uint32_t c = scaleColor(gp0_rgb(90, 90, 96), tw);
+			int size = (i % 7 == 0) ? 3 : ((i % 3 == 0) ? 2 : 1);
+
+			point(chain, bx, y, size, c, true);
+		}
+	}
+
+	setBlend(chain, GP0_BLEND_SEMITRANS);
+}
+
 
 /* --- colour palettes for the PSP wave themes ---------------------------- */
 

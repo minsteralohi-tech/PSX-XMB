@@ -87,28 +87,38 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
  * DRAW sizes are separate: the sprites below draw only the real artwork
  * area, not the padding.
  */
-#define SONY_W 160   /* padded; artwork is 160x28 */
-#define SONY_H  32
-#define COMP_W 128   /* padded; artwork is 124x16 */
+#define SONY_W 128   /* padded; artwork is 115x19 */
+#define SONY_H  24
+#define COMP_W 128   /* padded; artwork is 120x11 */
 #define COMP_H  16
-#define ENTR_W 128   /* padded; artwork is 127x11 */
+#define ENTR_W 128   /* padded; artwork is 124x10 */
 #define ENTR_H  16
-#define TM_W    16   /* padded; artwork is 15x10  */
+#define TM_W    16   /* padded; artwork is 14x7   */
 #define TM_H    16
 #define PSLG_W  96   /* padded; artwork is 90x82  */
 #define PSLG_H  88
 #define PSTX_W  80   /* padded; artwork is 80x18  */
 #define PSTX_H  24
 
-/* Visible artwork inside each padded texture. */
-#define SONY_DW 160
-#define SONY_DH  28
-#define COMP_DW 124
-#define COMP_DH  16
-#define ENTR_DW 127
-#define ENTR_DH  11
-#define TM_DW    15
-#define TM_DH    10
+/*
+ * Visible artwork inside each padded texture.
+ *
+ * The four SCE wordmarks were re-cut to the sizes measured off a real BIOS
+ * screen rather than the ones the CSS remake implied. The old SONY in
+ * particular was 160 wide - wider than the diamond - where the real one is
+ * narrower than it, and COMPUTER was 16 tall against ENTERTAINMENT's 11, so
+ * the two lines did not even match each other and overlapped on screen.
+ *
+ * They are also antialiased now; see the note above initPS1Boot().
+ */
+#define SONY_DW 115
+#define SONY_DH  19
+#define COMP_DW 120
+#define COMP_DH  11
+#define ENTR_DW 124
+#define ENTR_DH  10
+#define TM_DW    14
+#define TM_DH     7
 #define PSLG_DW  90
 #define PSLG_DH  82
 #define PSTX_DW  80
@@ -181,14 +191,25 @@ static void rotatePoint(int cx, int cy, int *x, int *y) {
 
 /*
  * The CSS lays the whole animation out inside a square (100vmin), so on a
- * 320x240 screen the reference square is 240x240, centred: x 40..280.
- * Everything below is a percentage of that square, not of the full width.
+ * 320x240 screen the reference square would be 240x240, centred: x 40..280.
+ * Everything below is a percentage of that box, not of the full width.
+ *
+ * It is a rectangle rather than a square here. Measured against a real BIOS
+ * screen the mark is 127 wide and 135 tall, centred three pixels above the
+ * middle of the frame - not the 120x120 at dead centre the CSS gives. Widening
+ * and heightening the reference box scales the diamond AND the two triangles
+ * together, which is the point: they are all laid out as percentages of it, so
+ * the notches stay exactly where they belong.
  */
-#define SQ      240
-#define SQ_X     40
-#define SQ_Y      0
+#define SQ_CX   160
+#define SQ_CY   117
+#define SQW     256                  /* diamond half-width  = SQW / 4 = 64 */
+#define SQH     268                  /* diamond half-height = SQH / 4 = 67 */
+#define SQ_X    (SQ_CX - SQW / 2)
+#define SQ_Y    (SQ_CY - SQH / 2)
 
-#define PCT_Y(p) (SQ_Y + (SQ * (p)) / 100)
+#define PCT_X(p) (SQ_X + (SQW * (p)) / 100)
+#define PCT_Y(p) (SQ_Y + (SQH * (p)) / 100)
 
 static int clampi(int v, int lo, int hi) {
 	return v < lo ? lo : (v > hi ? hi : v);
@@ -220,7 +241,7 @@ static void gouraudQuad(
 ) {
 	// Every vertex goes through the spin, so the Spin variant needs no
 	// separate drawing code at all - it is the same quads, turned.
-	int cx = SQ_X + SQ / 2, cy = SQ_Y + SQ / 2;
+	int cx = SQ_CX, cy = SQ_CY;
 
 	rotatePoint(cx, cy, &x0, &y0);
 	rotatePoint(cx, cy, &x1, &y1);
@@ -229,8 +250,11 @@ static void gouraudQuad(
 
 	// Glass is the same fill drawn semi-transparently. Nothing else about
 	// the shape or the gradient changes.
-	bool blend = (introVariant == PS1_INTRO_GLASS)
-	          || (introVariant == PS1_INTRO_GLASS_WAVES);
+	//
+	// White Ribbons is deliberately NOT in this list: the mark stays solid
+	// there, exactly as in Classic. Making it see-through as well left it
+	// washed out against the field behind it.
+	bool blend = (introVariant == PS1_INTRO_GLASS);
 
 	GPUDMAChain *chain = getCurrentChain(ctx);
 	uint32_t *ptr = allocateGP0Packet(chain, 8);
@@ -293,10 +317,10 @@ static void spriteFadeOnLight(
  * replaced the artwork with new shapes, which was the wrong idea. What
  * changes is only how the same quads are drawn:
  *
- *   Classic      as the original
- *   Glass        the same quads, blended, so the background shows through
- *   Spin         the same flat quads, rotated about the centre once
- *   Waves        the same mark, over the real wave theme in white
+ *   Classic       as the original
+ *   Glass         the same quads, blended, so the background shows through
+ *   Spin          the same flat quads, rotated about the centre once
+ *   White Ribbons the same solid mark, over white ribbons and sparkles
  * ===================================================================== */
 
 void setPS1IntroVariant(int variant) {
@@ -304,6 +328,34 @@ void setPS1IntroVariant(int variant) {
 		introVariant = variant;
 }
 
+/*
+ * WHY THE WORDMARKS LOOK SHARP NOW
+ *
+ * They used to be two-colour art: one transparent index and one ink index,
+ * nothing in between. At 4bpp that throws away fourteen of the sixteen palette
+ * entries and leaves every diagonal and every curve as a bare staircase, which
+ * is exactly what the SONY "S" and "Y" and the "R" in COMPUTER looked like.
+ * The real BIOS wordmarks are antialiased, and that - not resolution - is the
+ * whole difference.
+ *
+ * So the art is now generated antialiased, by tools/make_intro_wordmarks.py
+ * from the one-bit masters in assets/orig_intro_*.png. Coverage is quantised
+ * to fifteen levels and baked into the CLUT as opaque greys ramping from the
+ * screen's white down to the ink, with index 0 left transparent so the sprite
+ * still has no background box. Sixteen entries exactly - the most 4bpp holds,
+ * and all convertImage.py will accept.
+ *
+ * Two consequences worth knowing:
+ *
+ *   - The ramp is baked against WHITE, because that is what the SCE screen is.
+ *     Over the White Ribbons variant's field the edge pixels are therefore a
+ *     touch lighter than their surroundings; that field is near-white, so it
+ *     does not read.
+ *   - The texels are opaque (no STP bit), so the GPU ignores the blend flag on
+ *     them and spriteFadeOnLight()'s repeated passes collapse into a single
+ *     step. The wordmarks pop in rather than fading. That was already true of
+ *     the old art and is left alone here.
+ */
 void initPS1Boot(RenderContext *ctx) {
 	(void) ctx;
 
@@ -361,9 +413,10 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	const uint32_t edge   = 0x0517e0;   /* 0xBBGGRR of #E01705 */
 	const uint32_t centre = 0x0093df;   /* 0xBBGGRR of #DF9300 */
 
-	int cx = SQ_X + SQ / 2;
-	int cy = SQ_Y + SQ / 2;
-	int r  = SQ / 4;                    /* 50% box -> 25% half-extent */
+	int cx = SQ_CX;
+	int cy = SQ_CY;
+	int rx = SQW / 4;                   /* 50% box -> 25% half-extent */
+	int ry = SQH / 4;
 
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
 
@@ -387,10 +440,10 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 		// TL, TR, BL, BR order: top and bottom points are the centre colour,
 		// left and right points the edge colour.
 		gouraudQuad(ctx,
-			cx - r, cy,     e,
-			cx,     cy - r, c,
-			cx,     cy + r, c,
-			cx + r, cy,     e);
+			cx - rx, cy,      e,
+			cx,      cy - ry, c,
+			cx,      cy + ry, c,
+			cx + rx, cy,      e);
 	}
 
 	/*
@@ -420,16 +473,16 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	if (frame >= T_TRI_START) {
 		int k = ramp(frame, T_TRI_START, T_TRI_END);
 
-		/* Sizes: 25%x50% -> 10%x20% of the square. */
-		int w = ((25 + ((10 - 25) * k) / 256) * SQ) / 100;
-		int h = ((50 + ((20 - 50) * k) / 256) * SQ) / 100;
+		/* Sizes: 25%x50% -> 10%x20% of the reference box. */
+		int w = ((25 + ((10 - 25) * k) / 256) * SQW) / 100;
+		int h = ((50 + ((20 - 50) * k) / 256) * SQH) / 100;
 
 		/* Top-left corners, in percent * 100 to keep the interpolation
 		 * honest with integer maths. */
-		int t1x = ((2500 + ((4100 - 2500) * k) / 256) * SQ) / 10000;
-		int t1y = ((2500 + ((3100 - 2500) * k) / 256) * SQ) / 10000;
-		int t2x = ((5000 + ((4900 - 5000) * k) / 256) * SQ) / 10000;
-		int t2y = ((2500 + ((4900 - 2500) * k) / 256) * SQ) / 10000;
+		int t1x = ((2500 + ((4100 - 2500) * k) / 256) * SQW) / 10000;
+		int t1y = ((2500 + ((3100 - 2500) * k) / 256) * SQH) / 10000;
+		int t2x = ((5000 + ((4900 - 5000) * k) / 256) * SQW) / 10000;
+		int t2y = ((2500 + ((4900 - 2500) * k) / 256) * SQH) / 10000;
 
 		t1x += SQ_X; t2x += SQ_X;
 		t1y += SQ_Y; t2y += SQ_Y;
@@ -462,19 +515,18 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 		// Positions below are measured off the real BIOS screens, as
 		// percentages of the 4:3 frame, rather than guessed from the CSS.
 		spriteFadeOnLight(ctx, &sonyTex,
-			(ctx->screenWidth - SONY_DW) / 2, 22, SONY_DW, SONY_DH, textLevel);
+			(ctx->screenWidth - SONY_DW) / 2, 21, SONY_DW, SONY_DH, textLevel);
 
 		spriteFadeOnLight(ctx, &computerTex,
-			(ctx->screenWidth - COMP_DW) / 2, 198, COMP_DW, COMP_DH, textLevel);
+			(ctx->screenWidth - COMP_DW) / 2, 194, COMP_DW, COMP_DH, textLevel);
 
 		spriteFadeOnLight(ctx, &enterTex,
-			(ctx->screenWidth - ENTR_DW) / 2, 214, ENTR_DW, ENTR_DH, textLevel);
+			(ctx->screenWidth - ENTR_DW) / 2, 207, ENTR_DW, ENTR_DH, textLevel);
 #endif
 
-		// The trademark mark, drawn in the dashboard's own font: it is two
-		// characters at 3vmin and rasterising an asset for it would cost
-		// more than it is worth.
-		spriteFadeOnLight(ctx, &tmTex, cx + 26, 178, TM_DW, TM_DH, textLevel);
+		// The trademark mark. Sits just off the diamond's bottom-right
+		// corner, as it does on the real screen.
+		spriteFadeOnLight(ctx, &tmTex, cx + 8, 180, TM_DW, TM_DH, textLevel);
 	}
 }
 
@@ -543,7 +595,7 @@ int chooseIntroVariant(RenderContext *ctx) {
 		"1  Classic      flat gradient, as original",
 		"2  Glass        same logo, see-through",
 		"3  Spin         same logo, spun once",
-		"4  White Waves  logo over white wave theme",
+		"4  White Ribbons  solid logo, white ribbons",
 	};
 
 	int sel = 0;
@@ -626,24 +678,17 @@ void runPS1Boot(RenderContext *ctx) {
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
 			white ? 0xffffff : 0x000000, false);
 
-		// Variant 4 replaces the flat white field with a wave field, still
-		// in white so the black artwork on top stays readable.
 		/*
-		 * Variant 4 replaces the flat white field with the REAL wave
-		 * theme - the same drawXMBBackground() the menu uses - with its
-		 * palette forced white. Reusing the renderer is what makes it
-		 * look like the menu's waves rather than an approximation; the
-		 * hand-rolled version this replaces came out a pixelated mess.
+		 * Variant 4 replaces the flat white field with the Parallax
+		 * Ribbons theme's own ribbons and the PS5 Sparkle theme's own
+		 * rising particles, both rendered in white - see
+		 * xmbDrawWhiteRibbons(). It is called directly rather than through
+		 * drawXMBBackground(), so the user's chosen theme index is left
+		 * alone - the previous version of this had to save it, overwrite
+		 * it and put it back.
 		 */
-		if (white && introVariant == PS1_INTRO_GLASS_WAVES) {
-			uint8_t saved = xmbThemeIndex;
-
-			xmbThemeIndex = 0;              /* the palette-driven theme */
-			xmbSetWhitePalette(true);
-			drawXMBBackground(ctx);
-			xmbSetWhitePalette(false);
-			xmbThemeIndex = saved;
-		}
+		if (white && introVariant == PS1_INTRO_WHITE_RIBBONS)
+			xmbDrawWhiteRibbons(ctx);
 
 		if (white) {
 			int out = frame >= T_SCE_OUT

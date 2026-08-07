@@ -56,7 +56,7 @@ typedef enum {
 	PS1_INTRO_CLASSIC = 0,   /* flat gradient, exactly like the original    */
 	PS1_INTRO_GLASS,         /* the same mark drawn semi-transparent        */
 	PS1_INTRO_SPIN,          /* the same flat mark, spun once               */
-	PS1_INTRO_GLASS_WAVES,   /* the mark over the wave theme in white       */
+	PS1_INTRO_WHITE_RIBBONS, /* solid mark over white ribbons + sparkles    */
 	PS1_INTRO_COUNT
 } PS1IntroVariant;
 
