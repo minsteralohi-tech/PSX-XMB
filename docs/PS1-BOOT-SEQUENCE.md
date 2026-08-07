@@ -78,6 +78,33 @@ square, not to the full width.
   those two words get rasterised into the same kind of asset the logos use,
   or they get drawn in the existing font and simply look different.
 
+## Correction: the SCE wordmarks
+
+The geometry table above is what the CSS remake implies, and for the two
+wordmarks it is wrong. Measured against a real BIOS screen:
+
+| Element | This table said | Actually |
+|---|---|---|
+| Diamond | 120x120 at (100, 60) | 127x135, centred at (160, 117) |
+| SONY | 120 wide at y≈12 | 115x19 at y=21 — *narrower* than the diamond |
+| COMPUTER | ~19px tall | 120x11 at y=194 |
+| ENTERTAINMENT | ~13px tall | 124x10 at y=207 |
+
+The old SONY was 160 wide, wider than the diamond; the real one is narrower.
+COMPUTER was 16 tall against ENTERTAINMENT's 11, so the two lines did not
+match each other and collided on screen.
+
+They were also two-colour art — one transparent index, one ink index — which
+wastes fourteen of a 4bpp palette's sixteen entries and leaves every curve a
+bare staircase. **That, not resolution, is why they looked pixelated next to
+the BIOS.** They are now generated antialiased by
+`tools/make_intro_wordmarks.py` from the one-bit masters in
+`assets/orig_intro_*.png`, with fifteen opaque grey levels ramping from the
+screen's white down to the ink and index 0 left transparent. The PS1 has no
+per-texel alpha, only a single semi-transparency bit, so the blend toward the
+background has to be baked into the colours — which means these sprites are
+correct on a white field and nowhere else.
+
 ## Assets already produced
 
 `tools/svg2png.py` renders the two SVGs without any external rasteriser
