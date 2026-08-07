@@ -153,24 +153,22 @@ void drawXMBBackground(RenderContext *ctx);
 void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
 
 /*
- * The boot intro's PlayStation screen: the real GTE-transformed PS logo model
- * (ps_logo_model.h - the same one the TEST logo theme and PS4 v2 draw), posed
- * rather than free-spinning, so the intro can animate it into place.
+ * The boot intro's PlayStation screen: the GTE-transformed PS logo model from
+ * ps_logo_bios.h - the real one, converted from the supplied GLB, not the
+ * coarser ps_logo_model.h the TEST logo theme and PS4 v2 draw.
  *
  * cx/cy is where the model's centre lands, camZ is the camera distance
- * (smaller is bigger), yaw/pitch/roll are in the 4096-per-circle scale
- * isin() uses, and bright is 0..256 scaling every face colour - which is how
- * the logo fades up out of black, since the faces are flat-shaded.
+ * (smaller is bigger), and bright is 0..256 scaling every face colour - which
+ * is how the logo fades up out of black, since the faces are flat-shaded.
  *
- * All of those are tuning knobs; the intro keeps its values in one block at
- * the top of drawPsScreen(). xmbGetPSLogoStandUpRoll() returns the roll that
- * stands the model upright facing the camera, which is the sane default.
+ * `spin` is the swing-in angle about the vertical, in the 4096-per-circle
+ * scale isin() uses. At 0 the model is already in the BIOS screen's resting
+ * pose: that pose is baked into its vertices, so there is nothing else to get
+ * right. The intro keeps its values in one block above drawPsScreen().
  */
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ,
-	int yaw, int pitch, int roll, int bright
+	RenderContext *ctx, int cx, int cy, int camZ, int spin, int bright
 );
-int  xmbGetPSLogoStandUpRoll(void);
 
 /*
  * Advance the wave animation clock by extra frames, on top of the one frame

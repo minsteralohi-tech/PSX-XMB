@@ -570,20 +570,33 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 
 /* --- the PlayStation (black) screen -----------------------------------
  *
- * Placement of the 3D logo. All six are tuning knobs - see the note in
- * drawPsScreen() - and all six are guesses from the reference screenshot,
- * because the pose cannot be read off a still with any precision.
+ * Placement and swing-in of the 3D logo.
  *
- * CAM_Z 300: the model is 266 units tall (ps_logo_model.h, already scaled),
- * setupCosmosGTE() sets H = min(w,h)/2 = 120 at 320x240, and projected height
- * is roughly H * 266 / camZ - so 300 gives about 106 pixels, against the ~111
- * the BIOS screen shows.
+ * The resting pose is baked into the model (see ps_logo_bios.h), so there is
+ * no orientation to get right here - at spin 0 it is already the BIOS screen's
+ * three-quarter view. What is left is where it sits, how big it is, and how it
+ * arrives, and those are tuning knobs:
+ *
+ *   CAM_Z 430: the posed model is 326 units across and setupCosmosGTE() sets
+ *   H = min(w,h)/2 = 120 at 320x240, so projected width is about
+ *   120 * 326 / camZ - roughly 110 pixels, against the ~100 the BIOS shows.
+ *
+ *   SWING 2200 is a little over half a turn, so the logo genuinely arrives
+ *   from behind rather than nudging into place, and it takes SWING_FRAMES to
+ *   get there - two seconds rather than the previous 27 frames.
  */
-#define PS_LOGO_CX     160
-#define PS_LOGO_CY      80
-#define PS_LOGO_CAM_Z  300
-#define PS_LOGO_PITCH  260     /* ~23 degrees, tipping the top toward us */
-#define PS_LOGO_SWING 1400     /* ~123 degrees of swing-in               */
+#define PS_LOGO_CX      160
+#define PS_LOGO_CY       80
+#define PS_LOGO_CAM_Z   430
+#define PS_LOGO_SWING  2200    /* ~193 degrees of swing-in */
+
+/*
+ * Frames the swing takes, counted from T_PS_LOGO. Deliberately longer than
+ * the brightness fade (T_PS_LOGO..T_PS_LOGO_END, 27 frames): the logo is fully
+ * lit well before it stops moving, which is what makes the arrival read as a
+ * settle rather than a fade.
+ */
+#define PS_LOGO_SWING_FRAMES 120
 
 static void drawPsScreen(RenderContext *ctx, int frame) {
 	int logoLevel    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
@@ -603,31 +616,23 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		/*
 		 * The real model, GTE-transformed, rather than a flat sprite.
 		 *
-		 * It swings in: the logo starts turned away and rotates to face the
-		 * camera over the same window the old sprite faded in, easing to a
-		 * stop rather than snapping, and holds the BIOS pose for the rest of
-		 * the screen. The fade is the same ramp, applied to the flat face
-		 * colours instead of to a texture tint.
+		 * It swings in from behind over PS_LOGO_SWING_FRAMES and eases to a
+		 * stop in the BIOS pose, which it then holds for the rest of the
+		 * screen. The fade is the same ramp as before, applied to the flat
+		 * face colours instead of to a texture tint.
 		 *
-		 * EVERY CONSTANT BELOW IS A TUNING KNOB, and none of them could be
-		 * confirmed from the reference screenshots - they are a considered
-		 * starting point, not a measurement. Adjust and rebuild:
-		 *
-		 *   PS_LOGO_CX/CY   where the logo's centre sits
-		 *   PS_LOGO_CAM_Z   distance; smaller is bigger on screen
-		 *   PS_LOGO_PITCH   tips the top toward the camera, which is what
-		 *                   shows the top faces of the swoosh the way the
-		 *                   BIOS screen does
-		 *   PS_LOGO_SWING   how far round it starts, in 4096ths of a turn
+		 * The ease is cubic rather than the quadratic used for the SCE spin:
+		 * over two seconds a quadratic still arrives visibly quickly, where
+		 * this coasts most of the way round and then settles.
 		 */
-		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
-		int ease = 256 - (((256 - k) * (256 - k)) >> 8);
-		int yaw  = (PS_LOGO_SWING * (256 - ease)) >> 8;
+		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO + PS_LOGO_SWING_FRAMES);
+		int inv  = 256 - k;
+		int ease = (((inv * inv) >> 8) * inv) >> 8;   /* 256 -> 0, cubic */
+		int spin = (PS_LOGO_SWING * ease) >> 8;
 
 		xmbDrawIntroPSLogo(ctx,
 			PS_LOGO_CX, PS_LOGO_CY, PS_LOGO_CAM_Z,
-			yaw, PS_LOGO_PITCH, xmbGetPSLogoStandUpRoll(),
-			clampi(logoLevel, 0, 256));
+			spin, clampi(logoLevel, 0, 256));
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates

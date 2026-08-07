@@ -29,6 +29,7 @@
 #include "main/trig.h"
 #include "main/xmb_bg.h"
 #include "main/model/ps_logo_model.h"
+#include "main/model/ps_logo_bios.h"
 #include "ps1/cop0.h"
 #include "ps1/gte.h"
 #include "ps1/gpucmd.h"
@@ -2546,34 +2547,41 @@ typedef struct {
 // in raw units (0..4095) so callers that want the debug degree readout
 // don't have to recompute it themselves.
 /*
- * As drawPSLogoModel() below, but at an explicit pose and brightness rather
- * than a free-running spin at full brightness. `bright` is 0..256 and scales
- * every face colour, which is how the boot intro fades the logo up out of
- * black - the faces are flat-shaded, so scaling their colour IS the fade.
+ * As drawPSLogoModel() below, but drawing a caller-chosen model at an explicit
+ * pose and brightness rather than psLogoVertices[] free-spinning at full
+ * brightness. `bright` is 0..256 and scales every face colour, which is how
+ * the boot intro fades the logo up out of black - the faces are flat-shaded,
+ * so scaling their colour IS the fade.
  *
- * `pitch` is applied between the spin and the stand-up tilt, so it tips the
- * already-standing model toward or away from the camera without disturbing
- * either. See the note above on why the call order looks backwards.
+ * MIND THE AXIS NAMES. cosmosRotate()'s parameters are called yaw/pitch/roll
+ * but its first turns about Z, its second about Y and its third about X.
+ * `spinY` therefore goes in slot 2 and `tiltX` in slot 3, and the tilt is
+ * passed second so it lands innermost - see the note above on why the call
+ * order looks backwards.
  */
 static void drawPSLogoModelPose(
-	GPUDMAChain *chain, int yaw, int pitch, int roll, int bright
+	GPUDMAChain *chain,
+	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
+	int spinY, int tiltX, int bright
 ) {
 	gte_setRotationMatrix(GTE_UNIT, 0, 0,  0, GTE_UNIT, 0,  0, 0, GTE_UNIT);
 
-	cosmosRotate(0, yaw, 0);
-	if (pitch)
-		cosmosRotate(pitch, 0, 0);
-	cosmosRotate(0, 0, roll);
+	cosmosRotate(0, spinY, 0);
+	if (tiltX)
+		cosmosRotate(0, 0, tiltX);
 
-	static PSLogoDrawFace drawFaces[PS_LOGO_FACE_COUNT];
+	static PSLogoDrawFace drawFaces[
+		(PS_LOGO_FACE_COUNT > PS_LOGO_BIOS_FACE_COUNT)
+			? PS_LOGO_FACE_COUNT : PS_LOGO_BIOS_FACE_COUNT
+	];
 	int ndraw = 0;
 
-	for (int i = 0; i < PS_LOGO_FACE_COUNT; i++) {
-		const PSLogoFace *face = &psLogoFaces[i];
+	for (int i = 0; i < faceCount; i++) {
+		const PSLogoFace *face = &faces[i];
 
-		gte_loadV0((const GTEVector16 *) &psLogoVertices[face->v0]);
-		gte_loadV1((const GTEVector16 *) &psLogoVertices[face->v1]);
-		gte_loadV2((const GTEVector16 *) &psLogoVertices[face->v2]);
+		gte_loadV0((const GTEVector16 *) &verts[face->v0]);
+		gte_loadV1((const GTEVector16 *) &verts[face->v1]);
+		gte_loadV2((const GTEVector16 *) &verts[face->v2]);
 		gte_command(GTE_CMD_RTPT | GTE_SF);
 
 		gte_command(GTE_CMD_NCLIP);
@@ -2619,27 +2627,28 @@ static void drawPSLogoModelPose(
 static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 	int yaw = (int) t * 8 & 4095;
 
-	drawPSLogoModelPose(chain, yaw, 0, roll, 256);
+	drawPSLogoModelPose(chain, psLogoVertices, psLogoFaces, PS_LOGO_FACE_COUNT,
+		yaw, roll, 256);
 	return yaw;
 }
 
 /*
- * The boot sequence's PlayStation screen draws the same model, but posed
+ * The boot sequence's PlayStation screen draws the OTHER model - the real one
+ * in ps_logo_bios.h, not the coarse ps_logo_model.h the themes use - posed
  * rather than free-spinning and positioned to match the BIOS screen.
  *
- * EVERY NUMBER THE CALLER PASSES IS MEANT TO BE TUNED BY EYE. Nothing here was
- * or could be confirmed against hardware from the reference screenshots alone
- * - see PS_LOGO_* in intro_ps1.c, which is where they live.
+ * No tilt is passed, because the resting pose is baked into that model's
+ * vertices (see its header). `spin` is the only angle, and it is the swing-in:
+ * at 0 the logo is exactly in the BIOS orientation.
  *
  *   cx, cy   where the model's centre lands on screen, in pixels
- *   camZ     camera distance; smaller is bigger. Projected height is
- *            roughly H * 266 / camZ, and setupCosmosGTE() sets
- *            H = min(w,h) / 2, so 120 at 320x240: camZ 300 gives ~106px.
+ *   camZ     camera distance; smaller is bigger. The posed model is 326 units
+ *            wide and setupCosmosGTE() sets H = min(w,h)/2, so 120 at
+ *            320x240: camZ 430 gives roughly 110 pixels across.
  *   bright   0..256, scales the flat face colours (the fade)
  */
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ,
-	int yaw, int pitch, int roll, int bright
+	RenderContext *ctx, int cx, int cy, int camZ, int spin, int bright
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -2656,11 +2665,9 @@ void xmbDrawIntroPSLogo(
 	gte_setControlReg(GTE_TRZ, camZ);
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
-	drawPSLogoModelPose(chain, yaw & 4095, pitch, roll, bright);
-}
-
-int xmbGetPSLogoStandUpRoll(void) {
-	return STAND_UP_ROLL;
+	drawPSLogoModelPose(chain,
+		psLogoBiosVertices, psLogoBiosFaces, PS_LOGO_BIOS_FACE_COUNT,
+		spin & 4095, 0, bright);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------
