@@ -122,8 +122,12 @@ MODELS = [
         # sub-mesh order here is blue, teal, the P, yellow - identified by
         # rendering each one in a debug colour, not guessed
         "colors":     [BLUE, TEAL, RED, YELLOW],
-        # the P (sub-mesh 2) stands ON the swoosh plate; lift its foot clear
-        "shift":      (2, 1, 0.9),
+        # The P (sub-mesh 2) stands ON the swoosh plate. 0.682 puts its foot
+        # exactly on the plate's top surface - joined edge to edge, no gap and
+        # no overlap. It is not a round number because it is measured: build
+        # once with 0, read the P's lowest Y against the swoosh's highest, and
+        # the difference is this. Re-derive it if the plate thinning changes.
+        "shift":      (2, 1, 0.682),
         # Grow the swoosh (sub-meshes 0, 1 and 3) about the P's centre
         "swoosh":     ([0, 1, 3], 2, 1.6),
         # Thin the swoosh plates to match the P's edge ON SCREEN.
@@ -165,7 +169,11 @@ TARGET_EXTENT = 330.0
 # mainly on the P's curved bowl edge. An earlier revision shaded far harder
 # and muddied the flat faces; RIM_BASE is the floor a rim facing fully away
 # from the light drops to.
-LIGHT    = (-0.6, -0.6, -0.53)
+# X is POSITIVE. Read literally that is a light to the right, but it is what
+# reproduces the reference BIOS screen's shading, which is the thing being
+# matched. Two earlier revisions had it the other way and put the dark rims on
+# the wrong edge of the P.
+LIGHT    = (0.6, -0.6, -0.53)
 FLAT_DOT = 0.55
 RIM_BASE = 0.72
 
@@ -253,7 +261,25 @@ def convert(spec, assets, models_dir):
     # moves against that averaged direction. See swoosh_erode above.
     erode = spec["swoosh_erode"]
     if erode > 0:
-        acc = {i: [0.0, 0.0] for i, o in enumerate(owner) if o in swoosh_meshes}
+        # Positions used by more than one colour band are seams. The bands are
+        # separate sub-meshes, so each contributes a rim face at every join.
+        pos_bands = {}
+        for i, o in enumerate(owner):
+            if o in swoosh_meshes:
+                pos_bands.setdefault(
+                    tuple(round(t, 3) for t in verts[i]), set()
+                ).add(o)
+
+        shared = [
+            o in swoosh_meshes
+            and len(pos_bands[tuple(round(t, 3) for t in verts[i])]) >= 2
+            for i, o in enumerate(owner)
+        ]
+
+        # First pass: split the swoosh's rim faces into seams and candidates,
+        # and remember each band's seam normal - the direction of a cut ACROSS
+        # the ribbon.
+        seam_n, rim = {}, []
 
         for v0, v1, v2, mi in faces:
             if mi not in swoosh_meshes:
@@ -270,11 +296,31 @@ def convert(spec, assets, models_dir):
             n = [t / nl for t in n]
             if abs(n[1]) > 0.5:      # a flat face, not a rim
                 continue
+            if shared[v0] and shared[v1] and shared[v2]:
+                seam_n[mi] = (n[0], n[2])
+                continue
+            rim.append((v0, v1, v2, n[0], n[2], mi))
+
+        # Second pass. A rim face running parallel to its band's seam is
+        # another cross-cut - the ribbon's free tip, or the end that butts
+        # against the P. Eroding those SHORTENS the ribbon, which is what put a
+        # gap between the S and the P; their vertices are pinned so the tip
+        # stays a straight edge instead of being nicked by the side faces.
+        acc = {i: [0.0, 0.0] for i, o in enumerate(owner) if o in swoosh_meshes}
+        pinned = set()
+
+        for v0, v1, v2, nx, nz, mi in rim:
+            sn = seam_n.get(mi)
+            if sn and abs(nx * sn[0] + nz * sn[1]) > 0.75:
+                pinned.update(v for v in (v0, v1, v2) if not shared[v])
+                continue
             for v in (v0, v1, v2):
-                acc[v][0] += n[0]
-                acc[v][1] += n[2]
+                acc[v][0] += nx
+                acc[v][1] += nz
 
         for i, (dx, dz) in acc.items():
+            if i in pinned:
+                continue
             m = math.hypot(dx, dz)
             if m < 1e-9:
                 continue
