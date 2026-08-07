@@ -98,8 +98,11 @@ MODELS = [
         "scale":        4.0,
         # sub-mesh order: the P, then the swoosh from the end the P stands on
         "colors":     [RED, YELLOW, TEAL, BLUE],
-        # the P (sub-mesh 0) sits inside the yellow slab; push it clear in Z
-        "shift":      (0, 2, 4.0),
+        # Push the P (sub-mesh 0) forward in Z until its front face is flush
+        # with the yellow slab's at 20.8 - touching, but not intersecting.
+        "shift":      (0, 2, 1.3),
+        # Grow the swoosh (sub-meshes 1-3) about the P's centre
+        "swoosh":     ([1, 2, 3], 0, 1.6),
     },
     {
         "glb":        "playstation_logo_bios.glb",
@@ -107,18 +110,26 @@ MODELS = [
         "prefix":     "psLogoBios2",
         "macro":      "PS_LOGO_BIOS2",
         "note":       "logo B - the system-BIOS model",
-        "mirror_z":   False,
-        "bake_yaw":    25.0,
+        # This model DOES need the Z mirror, same as A. Without it its P comes
+        # out with a cramped, wrong-way bowl - obvious once the P is rendered
+        # on its own, easy to miss with the swoosh drawn around it.
+        "mirror_z":   True,
+        "bake_yaw":   -25.0,   # sign flipped with mirror_z, as in A
         "bake_pitch":  12.0,
-        "scale":       13.0,   # matches A's on-screen size, so PS_LOGO_CAM_Z
-                               # does not have to change when switching
+        "scale":       13.0,
         # sub-mesh order here is blue, teal, the P, yellow - identified by
         # rendering each one in a debug colour, not guessed
         "colors":     [BLUE, TEAL, RED, YELLOW],
         # the P (sub-mesh 2) stands ON the swoosh plate; lift its foot clear
         "shift":      (2, 1, 0.9),
+        # Grow the swoosh (sub-meshes 0, 1 and 3) about the P's centre
+        "swoosh":     ([0, 1, 3], 2, 1.6),
     },
 ]
+
+# Every model is normalised to this posed extent, so they draw the same size
+# and the intro's PS_LOGO_*_CAM_Z stays valid when switching between them.
+TARGET_EXTENT = 330.0
 
 
 def load_glb(path):
@@ -182,6 +193,23 @@ def convert(spec, assets, models_dir):
             v[saxis] += samount
             verts[i] = tuple(v)
 
+    # Enlarge the swoosh about the P's centre. Lying flat and foreshortened it
+    # reads far smaller against the P than the reference screen shows; growing
+    # it about the P keeps the P planted mid-swoosh and pushes the swoosh
+    # outward. X and Z only - both models' swooshes are thin in Y, and scaling
+    # that axis would just make the plates chunkier.
+    swoosh_meshes, pivot_mesh, factor = spec["swoosh"]
+    pivot_v = [verts[i] for i, o in enumerate(owner) if o == pivot_mesh]
+    pivot = [(min(v[a] for v in pivot_v) + max(v[a] for v in pivot_v)) / 2
+             for a in range(3)]
+
+    for i, o in enumerate(owner):
+        if o in swoosh_meshes:
+            v = list(verts[i])
+            for a in (0, 2):
+                v[a] = pivot[a] + (v[a] - pivot[a]) * factor
+            verts[i] = tuple(v)
+
     lo = [min(v[a] for v in verts) for a in range(3)]
     hi = [max(v[a] for v in verts) for a in range(3)]
     ctr = [(lo[a] + hi[a]) / 2 for a in range(3)]
@@ -209,8 +237,16 @@ def convert(spec, assets, models_dir):
     posed = [tuple(p[a] - (blo[a] + bhi[a]) / 2 for a in range(3))
              for p in posed]
 
-    # Winding: the NCLIP swap and the Z mirror's handedness flip cancel, so
-    # only one of the two models ends up swapped. See points 2 and 5.
+    # Normalise to a fixed posed extent. Enlarging the swoosh grows the whole
+    # bounding box, which would silently change how big the logo draws and
+    # invalidate the pose tool's CAM Z; this keeps the models interchangeable.
+    extent = max(bhi[0] - blo[0], bhi[1] - blo[1])
+    if extent > 0:
+        k = TARGET_EXTENT / extent
+        posed = [tuple(c * k for c in p) for p in posed]
+
+    # Winding: the NCLIP swap and the Z mirror's handedness flip cancel out,
+    # so a mirrored model is NOT swapped here. See points 2 and 5.
     swap = not spec["mirror_z"]
 
     macro, prefix = spec["macro"], spec["prefix"]
