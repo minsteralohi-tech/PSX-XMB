@@ -103,6 +103,7 @@ MODELS = [
         "shift":      (0, 2, 1.3),
         # Grow the swoosh (sub-meshes 1-3) about the P's centre
         "swoosh":     ([1, 2, 3], 0, 1.6),
+        "swoosh_thin": 1.0,
     },
     {
         "glb":        "playstation_logo_bios.glb",
@@ -124,12 +125,35 @@ MODELS = [
         "shift":      (2, 1, 0.9),
         # Grow the swoosh (sub-meshes 0, 1 and 3) about the P's centre
         "swoosh":     ([0, 1, 3], 2, 1.6),
+        # Thin the swoosh plates to match the P's edge ON SCREEN.
+        #
+        # The raw thicknesses already match almost exactly - the P's slab is
+        # 0.948 and the plates are 0.920 - so this is NOT a numeric mismatch.
+        # The swoosh lies flat, so its edge faces the camera and projects at
+        # nearly full length, while the P stands upright and its edge is
+        # foreshortened. Matching what the eye sees means making the plates
+        # numerically thinner than the P.
+        "swoosh_thin": 0.7,
     },
 ]
 
 # Every model is normalised to this posed extent, so they draw the same size
 # and the intro's PS_LOGO_*_CAM_Z stays valid when switching between them.
 TARGET_EXTENT = 330.0
+
+# Rim shading, baked in the resting pose. LIGHT points from the surface toward
+# the light in that pose - X right, Y DOWN (PS1 screen space), Z into the
+# screen - so this is the top-left of the screen, slightly in front.
+#
+# Deliberately gentle and EDGE-ONLY: a face pointing within FLAT_DOT of the
+# camera is one of the flat faces and keeps its colour untouched, so the logo
+# still reads as flat colour. Only the extruded rims vary, which shows up
+# mainly on the P's curved bowl edge. An earlier revision shaded far harder
+# and muddied the flat faces; RIM_BASE is the floor a rim facing fully away
+# from the light drops to.
+LIGHT    = (-0.6, -0.6, -0.53)
+FLAT_DOT = 0.55
+RIM_BASE = 0.72
 
 
 def load_glb(path):
@@ -210,6 +234,16 @@ def convert(spec, assets, models_dir):
                 v[a] = pivot[a] + (v[a] - pivot[a]) * factor
             verts[i] = tuple(v)
 
+    # Thin the swoosh plates about their own mid-plane. See swoosh_thin above.
+    thin = spec["swoosh_thin"]
+    if thin != 1.0:
+        sv = [verts[i][1] for i, o in enumerate(owner) if o in swoosh_meshes]
+        smid = (min(sv) + max(sv)) / 2
+        for i, o in enumerate(owner):
+            if o in swoosh_meshes:
+                x, y, z = verts[i]
+                verts[i] = (x, smid + (y - smid) * thin, z)
+
     lo = [min(v[a] for v in verts) for a in range(3)]
     hi = [max(v[a] for v in verts) for a in range(3)]
     ctr = [(lo[a] + hi[a]) / 2 for a in range(3)]
@@ -277,8 +311,30 @@ def convert(spec, assets, models_dir):
     lines += ["};", "",
               f"static const PSLogoFace {prefix}Faces[{macro}_FACE_COUNT] = {{"]
 
+    ln = math.sqrt(sum(c * c for c in LIGHT))
+    light = tuple(c / ln for c in LIGHT)
+
     for v0, v1, v2, mi in faces:
-        r, g, b = spec["colors"][mi]
+        # Edge-only rim shading. A face pointing within FLAT_DOT of the camera
+        # is a flat face and keeps full colour; rims get one gentle Lambert
+        # term. See the LIGHT block above.
+        a3, b3, c3 = posed[v0], posed[v1], posed[v2]
+        u = [b3[k] - a3[k] for k in range(3)]
+        w = [c3[k] - a3[k] for k in range(3)]
+        n = [u[1] * w[2] - u[2] * w[1],
+             u[2] * w[0] - u[0] * w[2],
+             u[0] * w[1] - u[1] * w[0]]
+        nl = math.sqrt(sum(t * t for t in n)) or 1.0
+        n = [t / nl for t in n]
+        if n[2] > 0:
+            n = [-t for t in n]
+
+        k = 1.0
+        if abs(n[2]) < FLAT_DOT:
+            lam = max(0.0, sum(p * q for p, q in zip(n, light)))
+            k = RIM_BASE + (1.0 - RIM_BASE) * lam
+
+        r, g, b = (min(255, round(ch * k)) for ch in spec["colors"][mi])
         a, c = (v2, v1) if swap else (v1, v2)
         lines.append(f"\t{{ {v0}, {a}, {c}, {r}, {g}, {b} }},")
 
