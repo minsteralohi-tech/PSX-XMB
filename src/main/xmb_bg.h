@@ -184,10 +184,15 @@ extern const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT];
 /* C exposes several baked face-colour/shadow comparisons in the pose tool. */
 int xmbIntroPSLogoShadeCount(int model);
 const char *xmbIntroPSLogoShadeName(int model, int shade);
+int xmbIntroPSLogoEffectCount(int model);
+const char *xmbIntroPSLogoEffectName(int model, int effect);
+int xmbIntroPSLogoAnimCount(int model);
+const char *xmbIntroPSLogoAnimName(int model, int anim);
 
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
-	int yaw, int pitch, int roll, int bright, int shade
+	int yaw, int pitch, int roll, int bright, int shade,
+	int effect, int anim, uint32_t fxFrame
 );
 
 /*

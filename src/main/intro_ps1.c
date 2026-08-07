@@ -615,6 +615,10 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  * live for hardware comparison; this is just the value it starts from.
  */
 #define PS_LOGO_MODEL 1
+#define PS_LOGO_TUNE_MODEL 2  /* open the pose/effect tool directly on C */
+#define PS_LOGO_SHADE 14  /* R1 15/16: ALL MEDIUM, hardware-approved */
+#define PS_LOGO_EFFECT 0
+#define PS_LOGO_ANIM   0
 
 /* Dialled in on hardware with the pose tool - do not "tidy" these. */
 #define PS_LOGO_START_YAW    148      /* tumbling in, from far away       */
@@ -682,7 +686,8 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 			DEG(poseLerp(PS_LOGO_START_YAW,   PS_LOGO_END_YAW,   ease)),
 			DEG(poseLerp(PS_LOGO_START_PITCH, PS_LOGO_END_PITCH, ease)),
 			DEG(poseLerp(PS_LOGO_START_ROLL,  PS_LOGO_END_ROLL,  ease)),
-			clampi(logoLevel, 0, 256), 0);
+			clampi(logoLevel, 0, 256), PS_LOGO_SHADE,
+			PS_LOGO_EFFECT, PS_LOGO_ANIM, (uint32_t) frame);
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates
@@ -767,8 +772,11 @@ static void tunePS1Logo(RenderContext *ctx) {
 	int which = 0;          /* 0 = START, 1 = END */
 	int sel   = 0;
 	int play  = -1;         /* frame of the preview, or -1 when not playing */
-	int model = PS_LOGO_MODEL;
-	int shade = 0;          /* C's R1-selectable baked-shadow comparison */
+	int model = PS_LOGO_TUNE_MODEL;
+	int shade = PS_LOGO_SHADE;
+	int effect = PS_LOGO_EFFECT;
+	int anim = PS_LOGO_ANIM;
+	uint32_t fxFrame = 0;
 	bool sawRelease = false;
 	uint16_t last = 0;
 
@@ -793,15 +801,21 @@ static void tunePS1Logo(RenderContext *ctx) {
 			int shadeCount = xmbIntroPSLogoShadeCount(model);
 			if ((pressed & PAD_BTN_R1) && shadeCount > 1)
 				shade = (shade + 1) % shadeCount;
+			int effectCount = xmbIntroPSLogoEffectCount(model);
+			if ((pressed & PAD_BTN_R2) && effectCount > 1)
+				effect = (effect + 1) % effectCount;
+			int animCount = xmbIntroPSLogoAnimCount(model);
+			if ((pressed & PAD_BTN_L2) && animCount > 1)
+				anim = (anim + 1) % animCount;
 			if (pressed & PAD_BTN_UP)
 				sel = (sel + POSE_FIELD_COUNT - 1) % POSE_FIELD_COUNT;
 			if (pressed & PAD_BTN_DOWN)
 				sel = (sel + 1) % POSE_FIELD_COUNT;
 
-			// Held rather than pressed, so a value can be run up quickly. C
-			// reserves R1 for shadow selection and uses R2 for x10; A/B keep
-			// the original R1 coarse modifier.
-			uint16_t coarse = (shadeCount > 1) ? PAD_BTN_R2 : PAD_BTN_R1;
+			// Held rather than pressed, so A/B values can be run up quickly.
+			// C uses all four shoulder buttons for model/shadow/effect/animation,
+			// so its pose fields intentionally stay at precise single steps.
+			uint16_t coarse = (model == 2) ? 0 : PAD_BTN_R1;
 			int step = poseStep[sel] * ((buttons & coarse) ? 10 : 1);
 
 			if (buttons & PAD_BTN_LEFT)
@@ -843,7 +857,8 @@ static void tunePS1Logo(RenderContext *ctx) {
 		xmbDrawIntroPSLogo(ctx, model,
 			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
 			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
-			DEG(shown[POSE_ROLL]), 256, shade);
+			DEG(shown[POSE_ROLL]), 256, shade,
+			effect, anim, fxFrame++);
 
 		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
 		printString(ctx, 104, 8, 0x40c0ff,
@@ -857,6 +872,24 @@ static void tunePS1Logo(RenderContext *ctx) {
 				shade + 1, shadeCount,
 				xmbIntroPSLogoShadeName(model, shade));
 			printString(ctx, 8, 90, 0xffa040, line);
+		}
+
+		int effectCount = xmbIntroPSLogoEffectCount(model);
+		if (effectCount > 1) {
+			char line[48];
+			snprintf(line, sizeof(line), "R2 EFFECT %d/%d  %s",
+				effect + 1, effectCount,
+				xmbIntroPSLogoEffectName(model, effect));
+			printString(ctx, 8, 100, 0x70c0ff, line);
+		}
+
+		int animCount = xmbIntroPSLogoAnimCount(model);
+		if (animCount > 1) {
+			char line[48];
+			snprintf(line, sizeof(line), "L2 ANIM %d/%d  %s",
+				anim + 1, animCount,
+				xmbIntroPSLogoAnimName(model, anim));
+			printString(ctx, 8, 110, 0xc080ff, line);
 		}
 
 		for (int i = 0; i < POSE_FIELD_COUNT; i++) {
@@ -874,7 +907,7 @@ static void tunePS1Logo(RenderContext *ctx) {
 			CH_PS1_CIRCLE_BUTTON " back");
 		printString(ctx, 8, 222, 0x707070,
 			(shadeCount > 1)
-				? "D-PAD adjust R2 x10 L1 model R1 shade"
+				? "D-PAD adjust L1 model R1 shade R2 FX L2 anim"
 				: "D-PAD pick/adjust   R1 x10   L1 model");
 
 		endFrame(ctx);
