@@ -788,6 +788,7 @@ def convert(spec, assets, models_dir):
     blender_view_normals = None
     blender_view = None
     blender_centers = None
+    blender_edge_mask = None
 
     if spec.get("blender_shadow"):
         yaw, pitch, roll = spec.get("shadow_pose", (0.0, 0.0, 0.0))
@@ -807,6 +808,16 @@ def convert(spec, assets, models_dir):
                                   for face in faces]
         blender_view_normals = [unit_face_normal(blender_view, face)
                                 for face in faces]
+        blender_edge_mask = []
+        inv_sqrt2 = 1.0 / math.sqrt(2.0)
+        p_mesh = spec["shift"][0]
+        for normal, face in zip(blender_source_normals, faces):
+            if face[3] == p_mesh:
+                cap_dot = abs(normal[0] * inv_sqrt2
+                              - normal[2] * inv_sqrt2)
+            else:
+                cap_dot = abs(normal[1])
+            blender_edge_mask.append(1 if cap_dot < 0.92 else 0)
         blender_centers = []
         for mi in range(len(spec["colors"])):
             mv = [blender_view[i] for i, o in enumerate(owner) if o == mi]
@@ -851,19 +862,11 @@ def convert(spec, assets, models_dir):
 
         for fi, (v0, v1, v2, mi) in enumerate(faces):
             if cfg.get("blender_shadow"):
-                source_n = blender_source_normals[fi]
-                if mi == spec["shift"][0]:
-                    inv_sqrt2 = 1.0 / math.sqrt(2.0)
-                    cap_dot = abs(source_n[0] * inv_sqrt2
-                                  - source_n[2] * inv_sqrt2)
-                else:
-                    cap_dot = abs(source_n[1])
-
                 # Keep the large artwork caps perfectly flat. Everything not
                 # parallel to a cap is a real extrusion/bevel face and gets
                 # the same ambient + directional response seen in Blender.
                 k = 1.0
-                if cap_dot < 0.92:
+                if blender_edge_mask[fi]:
                     n = tuple(-t for t in blender_view_normals[fi])
                     fc = tuple(sum(blender_view[v][a]
                                    for v in (v0, v1, v2)) / 3
@@ -989,6 +992,16 @@ def convert(spec, assets, models_dir):
             for r, g, b in colors:
                 lines.append(f"\t\t{{ {r}, {g}, {b} }},")
             lines.append("\t},")
+        lines.append("};")
+
+    if blender_edge_mask is not None:
+        lines += [
+            "",
+            f"static const uint8_t {prefix}EdgeMask[{macro}_FACE_COUNT] = {{",
+        ]
+        for i in range(0, len(blender_edge_mask), 32):
+            chunk = blender_edge_mask[i:i + 32]
+            lines.append("\t" + ", ".join(str(v) for v in chunk) + ",")
         lines.append("};")
 
     lines += ["", f"#endif // {macro}_H", ""]
