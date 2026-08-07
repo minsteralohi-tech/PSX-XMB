@@ -170,33 +170,50 @@ MODELS = [
         "note":       "logo C - the newly supplied full-resolution BIOS model",
         # Preserve the newly supplied model's original proportions. In
         # particular, do NOT inherit B's 1.6x swoosh growth, ribbon erosion or
-        # plate thinning. The only non-uniform edit is the measured P lift below
-        # that removes an actual intersection without reshaping either part.
+        # plate thinning. C now keeps the source part placement as well, so no
+        # non-uniform geometry edit is applied to it.
         "mirror_z":   True,
         "bake_yaw":   -25.0,
         "bake_pitch":  12.0,
         "scale":       13.0,
         "colors":     [BIOS_REF_BLUE, BIOS_REF_TEAL,
                        BIOS_REF_RED, BIOS_REF_YELLOW],
-        # C retains the source plate thickness, so its top is 0.820 source
-        # units above the P's lowest point. Lift only the P by that exact
-        # amount: the parts touch edge-to-edge without the intersection that
-        # lets a yellow face win the painter sort across the red foot.
-        "shift":      (2, 1, 0.820),
+        # Keep the P at the source GLB's original vertical level with the S.
+        # This deliberately removes the temporary 0.820-unit lift.
+        "shift":      (2, 1, 0.0),
         "swoosh":     ([0, 1, 3], 2, 1.0),
         "swoosh_thin": 1.0,
         "swoosh_erode": 0.0,
-        # Shade only each sub-mesh's OUTER boundary. The earlier generic rim
-        # Lambert shaded the cutout walls too, which put the dark band on the
-        # logo's internal edges. With the internal rims excluded, this light
-        # places the BIOS-style dark band on the outside-right/bottom edges.
-        # These overrides apply to C only.
-        "light":       (0.6, -0.6, -0.53),
-        "rim_base":    0.42,
-        "shade_outer_only": True,
-        # The P is mesh 2. On that mesh the BIOS shadow belongs on the outer
-        # right bowl/curve, not the long outside-left wall of the stem.
-        "shade_right_only_meshes": [2],
+        # Five intentionally different bakes for live comparison on hardware.
+        # R1 cycles them in C's pose tool; their order is generated into the
+        # model header along with the face-colour tables.
+        "shadow_variants": [
+            {
+                "name": "RIGHT CURVE",
+                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
+                "shade_outer_only": True,
+                "shade_right_only_meshes": [2],
+            },
+            {
+                "name": "LEFT STEM",
+                "light": (-0.6, -0.6, -0.53), "rim_base": 0.42,
+                "shade_outer_only": True,
+                "shade_left_only_meshes": [2],
+            },
+            {
+                "name": "ALL OUTER",
+                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
+                "shade_outer_only": True,
+            },
+            {
+                "name": "ALL RIMS R",
+                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
+            },
+            {
+                "name": "ALL RIMS L",
+                "light": (-0.6, -0.6, -0.53), "rim_base": 0.42,
+            },
+        ],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
         # it does not alter C's original proportions.
         "target_extent": 660.0,
@@ -453,14 +470,6 @@ def convert(spec, assets, models_dir):
     lines += ["};", "",
               f"static const PSLogoFace {prefix}Faces[{macro}_FACE_COUNT] = {{"]
 
-    model_light = spec.get("light", LIGHT)
-    flat_dot = spec.get("flat_dot", FLAT_DOT)
-    rim_base = spec.get("rim_base", RIM_BASE)
-    shade_outer_only = spec.get("shade_outer_only", False)
-    shade_right_only_meshes = spec.get("shade_right_only_meshes", [])
-    ln = math.sqrt(sum(c * c for c in model_light))
-    light = tuple(c / ln for c in model_light)
-
     # Per-sub-mesh centres let C distinguish the outside silhouette from hole
     # and cutout walls. With this file's exported winding the normal below
     # points toward the solid: on an outer rim its dot with (face-centre minus
@@ -473,48 +482,93 @@ def convert(spec, assets, models_dir):
             for a in range(3)
         ))
 
-    for v0, v1, v2, mi in faces:
-        # Edge-only rim shading. A face pointing within FLAT_DOT of the camera
-        # is a flat face and keeps full colour; rims get one gentle Lambert
-        # term. See the LIGHT block above.
-        a3, b3, c3 = posed[v0], posed[v1], posed[v2]
-        u = [b3[k] - a3[k] for k in range(3)]
-        w = [c3[k] - a3[k] for k in range(3)]
-        n = [u[1] * w[2] - u[2] * w[1],
-             u[2] * w[0] - u[0] * w[2],
-             u[0] * w[1] - u[1] * w[0]]
-        nl = math.sqrt(sum(t * t for t in n)) or 1.0
-        # NEGATED. The exported winding swap leaves this cross product pointing
-        # INTO the solid, so using it raw lights the side away from the light -
-        # which showed up as the shading landing on the wrong edge of the P.
-        n = [-t / nl for t in n]
+    def build_face_colors(variant):
+        """Return one RGB triple per face for a shadow-bake configuration."""
+        cfg = dict(spec)
+        cfg.update(variant)
+        model_light = cfg.get("light", LIGHT)
+        flat_dot = cfg.get("flat_dot", FLAT_DOT)
+        rim_base = cfg.get("rim_base", RIM_BASE)
+        shade_outer_only = cfg.get("shade_outer_only", False)
+        shade_right_only_meshes = cfg.get("shade_right_only_meshes", [])
+        shade_left_only_meshes = cfg.get("shade_left_only_meshes", [])
+        ln = math.sqrt(sum(c * c for c in model_light))
+        light = tuple(c / ln for c in model_light)
+        colors = []
 
-        k = 1.0
-        if abs(n[2]) < flat_dot:
-            shade = True
-            if shade_outer_only:
-                fc = tuple((a3[a] + b3[a] + c3[a]) / 3 for a in range(3))
-                radial = sum(
-                    n[a] * (fc[a] - mesh_centers[mi][a])
-                    for a in range(3)
-                )
-                shade = radial < 0
+        for v0, v1, v2, mi in faces:
+            # Edge-only rim shading. A face pointing within FLAT_DOT of the
+            # camera is flat and keeps full colour; selected rims get one
+            # Lambert term.
+            a3, b3, c3 = posed[v0], posed[v1], posed[v2]
+            u = [b3[k] - a3[k] for k in range(3)]
+            w = [c3[k] - a3[k] for k in range(3)]
+            n = [u[1] * w[2] - u[2] * w[1],
+                 u[2] * w[0] - u[0] * w[2],
+                 u[0] * w[1] - u[1] * w[0]]
+            nl = math.sqrt(sum(t * t for t in n)) or 1.0
+            n = [-t / nl for t in n]
 
-                # C's red P: keep its left stem wall at the full face colour
-                # and put the baked dark band only around the outside-right
-                # curve, matching the supplied BIOS capture.
-                if mi in shade_right_only_meshes:
-                    shade = shade and fc[0] > mesh_centers[mi][0]
+            k = 1.0
+            if abs(n[2]) < flat_dot:
+                shade = True
+                if shade_outer_only:
+                    fc = tuple((a3[a] + b3[a] + c3[a]) / 3
+                               for a in range(3))
+                    radial = sum(
+                        n[a] * (fc[a] - mesh_centers[mi][a])
+                        for a in range(3)
+                    )
+                    shade = radial < 0
 
-            if shade:
-                lam = max(0.0, sum(p * q for p, q in zip(n, light)))
-                k = rim_base + (1.0 - rim_base) * lam
+                    if mi in shade_right_only_meshes:
+                        shade = shade and fc[0] > mesh_centers[mi][0]
+                    if mi in shade_left_only_meshes:
+                        shade = shade and fc[0] <= mesh_centers[mi][0]
 
-        r, g, b = (min(255, round(ch * k)) for ch in spec["colors"][mi])
+                if shade:
+                    lam = max(0.0, sum(p * q for p, q in zip(n, light)))
+                    k = rim_base + (1.0 - rim_base) * lam
+
+            colors.append(tuple(
+                min(255, round(ch * k)) for ch in spec["colors"][mi]
+            ))
+
+        return colors
+
+    variants = spec.get("shadow_variants", [spec])
+    variant_colors = [build_face_colors(variant) for variant in variants]
+
+    for (v0, v1, v2, _mi), (r, g, b) in zip(faces, variant_colors[0]):
         a, c = (v2, v1) if swap else (v1, v2)
         lines.append(f"\t{{ {v0}, {a}, {c}, {r}, {g}, {b} }},")
 
-    lines += ["};", "", f"#endif // {macro}_H", ""]
+    lines += ["};"]
+
+    if len(variants) > 1:
+        lines += [
+            "",
+            f"#define {macro}_SHADE_COUNT {len(variants)}",
+            "",
+            f"static const char *const {prefix}ShadeNames"
+            f"[{macro}_SHADE_COUNT] = {{",
+        ]
+        for variant in variants:
+            lines.append(f"\t{json.dumps(variant['name'])},")
+        lines += [
+            "};",
+            "",
+            f"static const uint8_t {prefix}ShadeColors"
+            f"[{macro}_SHADE_COUNT][{macro}_FACE_COUNT][3] = {{",
+        ]
+        for colors in variant_colors:
+            lines.append("\t{")
+            for r, g, b in colors:
+                lines.append(f"\t\t{{ {r}, {g}, {b} }},")
+            lines.append("\t},")
+        lines.append("};")
+
+    lines += ["", f"#endif // {macro}_H", ""]
 
     dst = os.path.join(models_dir, spec["header"])
     with open(dst, "w", newline="\n") as f:
