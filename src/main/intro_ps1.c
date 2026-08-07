@@ -98,7 +98,7 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 #define TM_H    16
 #define PSLG_W  96   /* padded; artwork is 90x82  */
 #define PSLG_H  88
-#define PSTX_W  96   /* padded; artwork is 96x21  */
+#define PSTX_W 112   /* padded; artwork is 107x21 */
 #define PSTX_H  24
 
 /*
@@ -130,8 +130,15 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
  * letterforms enough pixels to be crisp; its master's aspect is preserved, and
  * the generator hardens this one's edges (CONTRAST_HARD) where the SCE
  * wordmarks stay linear.
+ *
+ * The trademark mark is part of this texture rather than a sprite of its own.
+ * The BIOS screen has a small raised TM right after the wordmark, and building
+ * it into the master means no second VRAM slot, no second CLUT and no second
+ * draw - the pair is one sprite, centred as a unit. tools/make_intro_wordmarks
+ * reads assets/orig_intro_pstext.png, which is the supplied wordmark
+ * (kept unmodified as orig_intro_pstext_word.png) with the TM composited on.
  */
-#define PSTX_DW  96
+#define PSTX_DW 107
 #define PSTX_DH  21
 
 #define INTRO_VRAM_X 960
