@@ -10,15 +10,16 @@ No dependencies beyond the standard library: GLB is a JSON chunk followed by a
 binary chunk, and the only accessors needed here are float POSITION and
 uint16/uint32 indices.
 
-TWO MODELS, because they are genuinely different shapes rather than different
-exports of one:
+THREE SELECTABLE MODELS:
 
   A  ps_logo_bios.h   a shallow relief - the flat artwork extruded a little,
                       everything in one slab
   B  ps_logo_bios2.h  built the way the real BIOS logo is: the P standing
                       upright on a swoosh lying flat on the ground plane
+  C  ps_logo_bios3.h  the newly supplied full-resolution BIOS GLB, kept as a
+                      separate pose-tool option so it can be tuned independently
 
-The intro picks between them with PS_LOGO_MODEL in intro_ps1.c, and the pose
+The intro picks among them with PS_LOGO_MODEL in intro_ps1.c, and the pose
 tool on the boot menu switches live with L1.
 
 WHAT THIS DOES BEYOND UNPACKING VERTICES
@@ -84,6 +85,14 @@ RED    = (230,   0,  18)
 YELLOW = (250, 196,   0)
 TEAL   = (  0, 166, 148)
 BLUE   = (  0,  88, 168)
+
+# Dominant flat-face colours sampled from the supplied original-BIOS screen.
+# C uses these independently of A/B so the new comparison option matches that
+# reference without silently changing the already hardware-tuned B model.
+BIOS_REF_RED    = (255,  31,   3)
+BIOS_REF_YELLOW = (232, 163,   0)
+BIOS_REF_TEAL   = ( 38, 141, 136)
+BIOS_REF_BLUE   = ( 53,  88, 146)
 
 MODELS = [
     {
@@ -151,6 +160,27 @@ MODELS = [
         # area-over-perimeter estimate suggested more than twice that, but it
         # counts the ribbon's flat cut ends as perimeter and so badly
         # under-reads the stroke; the render is the authority here.
+        "swoosh_erode": 1.0,
+    },
+    {
+        "glb":        "bios_playstation.glb",
+        "header":     "ps_logo_bios3.h",
+        "prefix":     "psLogoBios3",
+        "macro":      "PS_LOGO_BIOS3",
+        "note":       "logo C - the newly supplied full-resolution BIOS model",
+        # This source contains the same four-part, upright-P/flat-swoosh mesh
+        # layout as B. Keep every vertex and triangle, and apply the reference-
+        # tuned BIOS treatment independently so future C adjustments do not
+        # disturb the shipping model B.
+        "mirror_z":   True,
+        "bake_yaw":   -25.0,
+        "bake_pitch":  12.0,
+        "scale":       13.0,
+        "colors":     [BIOS_REF_BLUE, BIOS_REF_TEAL,
+                       BIOS_REF_RED, BIOS_REF_YELLOW],
+        "shift":      (2, 1, 0.682),
+        "swoosh":     ([0, 1, 3], 2, 1.6),
+        "swoosh_thin": 0.7,
         "swoosh_erode": 1.0,
     },
 ]
