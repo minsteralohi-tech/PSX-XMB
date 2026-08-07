@@ -187,31 +187,39 @@ MODELS = [
         # Five intentionally different bakes for live comparison on hardware.
         # R1 cycles them in C's pose tool; their order is generated into the
         # model header along with the face-colour tables.
+        # The mask is evaluated in the current hardware comparison pose so
+        # "right" means visible screen-right, not an ambiguous mesh normal.
+        "shadow_pose": (24.0, 7.0, 3.0),
         "shadow_variants": [
             {
-                "name": "RIGHT CURVE",
-                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
-                "shade_outer_only": True,
-                "shade_right_only_meshes": [2],
+                "name": "RIGHT SOFT",
+                "screen_right_shadow": True,
+                "right_start": 0.68, "right_floor": 0.70,
+                "right_power": 1.5,
             },
             {
-                "name": "LEFT STEM",
-                "light": (-0.6, -0.6, -0.53), "rim_base": 0.42,
-                "shade_outer_only": True,
-                "shade_left_only_meshes": [2],
+                "name": "RIGHT EDGE",
+                "screen_right_shadow": True,
+                "right_start": 0.76, "right_floor": 0.38,
+                "right_power": 1.0,
             },
             {
-                "name": "ALL OUTER",
-                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
-                "shade_outer_only": True,
+                "name": "RIGHT MEDIUM",
+                "screen_right_shadow": True,
+                "right_start": 0.58, "right_floor": 0.45,
+                "right_power": 1.2,
             },
             {
-                "name": "ALL RIMS R",
-                "light": (0.6, -0.6, -0.53), "rim_base": 0.42,
+                "name": "RIGHT WIDE",
+                "screen_right_shadow": True,
+                "right_start": 0.42, "right_floor": 0.48,
+                "right_power": 1.4,
             },
             {
-                "name": "ALL RIMS L",
-                "light": (-0.6, -0.6, -0.53), "rim_base": 0.42,
+                "name": "RIGHT DEEP",
+                "screen_right_shadow": True,
+                "right_start": 0.52, "right_floor": 0.28,
+                "right_power": 0.9,
             },
         ],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
@@ -486,6 +494,7 @@ def convert(spec, assets, models_dir):
         """Return one RGB triple per face for a shadow-bake configuration."""
         cfg = dict(spec)
         cfg.update(variant)
+        screen_right_shadow = cfg.get("screen_right_shadow", False)
         model_light = cfg.get("light", LIGHT)
         flat_dot = cfg.get("flat_dot", FLAT_DOT)
         rim_base = cfg.get("rim_base", RIM_BASE)
@@ -496,7 +505,39 @@ def convert(spec, assets, models_dir):
         light = tuple(c / ln for c in model_light)
         colors = []
 
+        # Explicit visible-screen X coordinates for the right-side comparison
+        # bakes. This is deliberately independent of surface normals: the
+        # right P curve is largely front-facing geometry, so a rim-only Lambert
+        # can never place a visible shadow band there.
+        screen_x = None
+        screen_lo = screen_hi = 0.0
+        if screen_right_shadow:
+            yaw, pitch, roll = cfg.get("shadow_pose", (0.0, 0.0, 0.0))
+            sy, cy = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
+            sp, cp = math.sin(math.radians(pitch)), math.cos(math.radians(pitch))
+            sr, cr = math.sin(math.radians(roll)), math.cos(math.radians(roll))
+            screen_x = []
+            for x, y, z in posed:
+                x1 = cy * x + sy * z
+                z1 = -sy * x + cy * z
+                y2 = cp * y - sp * z1
+                screen_x.append(cr * x1 - sr * y2)
+            screen_lo, screen_hi = min(screen_x), max(screen_x)
+
         for v0, v1, v2, mi in faces:
+            if screen_right_shadow:
+                x = (screen_x[v0] + screen_x[v1] + screen_x[v2]) / 3
+                xn = (x - screen_lo) / max(1e-9, screen_hi - screen_lo)
+                start = cfg.get("right_start", 0.5)
+                t = max(0.0, min(1.0, (xn - start) / max(1e-9, 1.0 - start)))
+                t = t ** cfg.get("right_power", 1.0)
+                floor = cfg.get("right_floor", 0.4)
+                k = 1.0 - (1.0 - floor) * t
+                colors.append(tuple(
+                    min(255, round(ch * k)) for ch in spec["colors"][mi]
+                ))
+                continue
+
             # Edge-only rim shading. A face pointing within FLAT_DOT of the
             # camera is flat and keeps full colour; selected rims get one
             # Lambert term.
