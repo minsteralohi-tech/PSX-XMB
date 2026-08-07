@@ -687,7 +687,10 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 			DEG(poseLerp(PS_LOGO_START_PITCH, PS_LOGO_END_PITCH, ease)),
 			DEG(poseLerp(PS_LOGO_START_ROLL,  PS_LOGO_END_ROLL,  ease)),
 			clampi(logoLevel, 0, 256), PS_LOGO_SHADE,
-			PS_LOGO_EFFECT, PS_LOGO_ANIM, (uint32_t) frame);
+			PS_LOGO_EFFECT, PS_LOGO_ANIM, (uint32_t) frame,
+			(frame >= T_PS_LOGO + PS_LOGO_MOVE_FRAMES)
+				? (uint32_t) (frame - (T_PS_LOGO + PS_LOGO_MOVE_FRAMES))
+				: 0);
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates
@@ -761,7 +764,7 @@ static const int poseMin[POSE_FIELD_COUNT]  = { -180, -180, -180,  60,  -64,  -6
 static const int poseMax[POSE_FIELD_COUNT]  = {  180,  180,  180, 4000, 384,  304 };
 static const int poseStep[POSE_FIELD_COUNT] = {    1,    1,    1,   10,    1,    1 };
 
-static void tunePS1Logo(RenderContext *ctx) {
+void runPSLogoPoseTool(RenderContext *ctx) {
 	int pose[2][POSE_FIELD_COUNT] = {
 		{ PS_LOGO_START_YAW, PS_LOGO_START_PITCH, PS_LOGO_START_ROLL,
 		  PS_LOGO_START_CAM_Z, PS_LOGO_START_X, PS_LOGO_START_Y },
@@ -777,6 +780,7 @@ static void tunePS1Logo(RenderContext *ctx) {
 	int effect = PS_LOGO_EFFECT;
 	int anim = PS_LOGO_ANIM;
 	uint32_t fxFrame = 0;
+	uint32_t settledFrames = 0;
 	bool sawRelease = false;
 	uint16_t last = 0;
 
@@ -802,8 +806,12 @@ static void tunePS1Logo(RenderContext *ctx) {
 			if ((pressed & PAD_BTN_R1) && shadeCount > 1)
 				shade = (shade + 1) % shadeCount;
 			int effectCount = xmbIntroPSLogoEffectCount(model);
-			if ((pressed & PAD_BTN_R2) && effectCount > 1)
+			if ((pressed & PAD_BTN_R2) && effectCount > 1) {
 				effect = (effect + 1) % effectCount;
+				/* Selecting the absorption effect while already viewing END
+				 * must still give its full one-second calm period. */
+				settledFrames = 0;
+			}
 			int animCount = xmbIntroPSLogoAnimCount(model);
 			if ((pressed & PAD_BTN_L2) && animCount > 1)
 				anim = (anim + 1) % animCount;
@@ -822,6 +830,8 @@ static void tunePS1Logo(RenderContext *ctx) {
 				pose[which][sel] -= step;
 			if (buttons & PAD_BTN_RIGHT)
 				pose[which][sel] += step;
+			if (buttons & (PAD_BTN_LEFT | PAD_BTN_RIGHT))
+				settledFrames = 0;
 
 			pose[which][sel] = clampi(pose[which][sel],
 				poseMin[sel], poseMax[sel]);
@@ -835,7 +845,9 @@ static void tunePS1Logo(RenderContext *ctx) {
 		 */
 		int shown[POSE_FIELD_COUNT];
 
+		bool logoSettled;
 		if (play >= 0) {
+			int previewFrame = play;
 			int k    = ramp(play, 0, PS_LOGO_MOVE_FRAMES);
 			int inv  = 256 - k;
 			int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);
@@ -843,12 +855,21 @@ static void tunePS1Logo(RenderContext *ctx) {
 			for (int i = 0; i < POSE_FIELD_COUNT; i++)
 				shown[i] = poseLerp(pose[0][i], pose[1][i], ease);
 
-			if (++play > PS_LOGO_MOVE_FRAMES + 30)
+			logoSettled = previewFrame >= PS_LOGO_MOVE_FRAMES;
+			/* Hold END long enough to see the one-second wait, an incoming
+			 * comet, its absorption and the resulting firework. */
+			if (++play > PS_LOGO_MOVE_FRAMES + 240)
 				play = -1;
 		} else {
 			for (int i = 0; i < POSE_FIELD_COUNT; i++)
 				shown[i] = pose[which][i];
+			logoSettled = which == 1;
 		}
+
+		if (logoSettled)
+			settledFrames++;
+		else
+			settledFrames = 0;
 
 		beginFrame(ctx);
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
@@ -858,7 +879,7 @@ static void tunePS1Logo(RenderContext *ctx) {
 			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
 			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
 			DEG(shown[POSE_ROLL]), 256, shade,
-			effect, anim, fxFrame++);
+			effect, anim, fxFrame++, settledFrames);
 
 		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
 		printString(ctx, 104, 8, 0x40c0ff,
@@ -906,7 +927,9 @@ static void tunePS1Logo(RenderContext *ctx) {
 			CH_PS1_SQUARE_BUTTON " preview   "
 			CH_PS1_CIRCLE_BUTTON " back");
 		printString(ctx, 8, 222, 0x707070,
-			(shadeCount > 1)
+			(model == 2)
+				? "D-PAD adjust L1 model R2 FX L2 anim"
+				: (shadeCount > 1)
 				? "D-PAD adjust L1 model R1 shade R2 FX L2 anim"
 				: "D-PAD pick/adjust   R1 x10   L1 model");
 
@@ -960,7 +983,7 @@ int chooseIntroVariant(RenderContext *ctx) {
 				if (sel != INTRO_MENU_POSE_TOOL)
 					break;
 
-				tunePS1Logo(ctx);
+				runPSLogoPoseTool(ctx);
 				sawRelease = false;
 				last = 0;
 			}

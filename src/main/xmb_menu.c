@@ -20,6 +20,7 @@
 #include "main/gpu_colorbars.h"
 #include "main/gpu_cube.h"
 #include "main/icon.h"
+#include "main/intro_ps1.h"
 #include "main/mainmenu.h"
 #include "main/memcard.h"
 #include "main/model_test.h"
@@ -60,6 +61,7 @@ static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item);
+static void xmbPSLogoPoseTool(RenderContext *ctx, UIState *state, const MenuItem *item);
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
@@ -94,6 +96,7 @@ static const XMBEntry hwItems[] = {
 	{ "GPU Color Bar",      5, runColorBarTest,    true },
 	{ "GPU Spinning Cube",  6, runGPUCubeTest,     true },
 	{ "Test PlayStation Model", 5, runModelTest,   true },
+	{ "PS Logo Pose Tool",  5, xmbPSLogoPoseTool,  true },
 	{ "CPU Benchmark",      7, runCPUBenchmark,    true },
 	{ "SPU Channel Test",   8, runSPUChannelTest,  true },
 	{ "Pad Tester",         9, runPadTest,         true },
@@ -207,6 +210,12 @@ static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *
 	// in launch_ui.c now, shared with Settings -> SIO Loader, so the two
 	// cannot drift apart. Returns if the user backs out.
 	runUniROMLauncher(ctx, state, item);
+}
+
+static void xmbPSLogoPoseTool(RenderContext *ctx, UIState *state, const MenuItem *item) {
+	(void) state;
+	(void) item;
+	runPSLogoPoseTool(ctx);
 }
 
 

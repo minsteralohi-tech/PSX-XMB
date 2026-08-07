@@ -84,6 +84,10 @@ void setPS1IntroVariant(int variant);
 /* Upload the four logo/text textures. Call once, after the GPU is up. */
 void initPS1Boot(RenderContext *ctx);
 
+/* Permanent hardware-tool entry for tuning the 3D logo pose, shadows,
+ * backdrop effects and material animations without replaying the boot menu. */
+void runPSLogoPoseTool(RenderContext *ctx);
+
 /*
  * Play the sequence, about 15.65 seconds. Returns when it finishes or the
  * user presses anything.

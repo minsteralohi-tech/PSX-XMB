@@ -3064,7 +3064,7 @@ const char *xmbIntroPSLogoShadeName(int model, int shade) {
  * deliberately use untextured additive fans and lines: the same inexpensive
  * vocabulary used for save points, magic, portals and lens flares on the
  * original hardware. */
-#define PS_LOGO_EFFECT_COUNT 27
+#define PS_LOGO_EFFECT_COUNT 28
 static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"NONE",
 	"WHITE HALO",
@@ -3093,6 +3093,7 @@ static const char *const psLogoEffectNames[PS_LOGO_EFFECT_COUNT] = {
 	"ELECTRIC CROSS",
 	"PORTAL SWIRL",
 	"RAINBOW VORTEX",
+	"STAR ABSORPTION",
 };
 
 static const char *const psLogoAnimNames[PS_LOGO_ANIM_COUNT] = {
@@ -3226,24 +3227,65 @@ static PS_LOGO_SIZE_ATTR void drawLogoOrbitTrails(
  * approved C pose. */
 static PS_LOGO_SIZE_ATTR void drawLogoGlassSatellites(
 	RenderContext *ctx, GPUDMAChain *chain, int cx, int cy,
-	uint32_t frame, int count
+	uint32_t frame, int count, int spread,
+	uint32_t starFrame, bool refractTrails
 ) {
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_OFX, cx << 16);
 	gte_setControlReg(GTE_OFY, (cy + 5) << 16);
+	int focal = ((ctx->screenWidth < ctx->screenHeight)
+		? ctx->screenWidth : ctx->screenHeight) / 2;
+	int scx[6], scy[6], crad[6];
 	for (int i = 0; i < count; i++) {
 		int a = ((int) frame * (2 + (i & 1))
 			+ i * (WAVE_FULL / count)) & (WAVE_FULL - 1);
-		int orbit = 110 + (i % 3) * 20;
+		int orbit = (110 + (i % 3) * 20) * spread / 100;
 		int wx = icos(a) * orbit >> 12;
 		int wy = isin(a) * (orbit * 3 / 5) >> 12;
 		int wz = 275 + (isin((a * 2 + i * 511) & (WAVE_FULL - 1)) * 35 >> 12);
 		int half = 10 + i % 3;
+		scx[i] = cx + wx * focal / wz;
+		scy[i] = cy + 5 + wy * focal / wz;
+		crad[i] = half * focal / wz;
 		drawGlassCube(chain, wx, wy, wz,
 			(int) frame * 3 + i * 470,
 			(int) frame * 2 + i * 690,
 			(int) frame + i * 310,
 			half, frame * 9 + i * 830);
+	}
+
+	if (!refractTrails)
+		return;
+
+	/* Test the whole visible trail history, not merely the comet head. The
+	 * starfield remains screen-centred while these cube positions remain
+	 * logo-centred, so moving C cannot drag the stars along with it. */
+	int starCx = ctx->screenWidth / 2;
+	int starCy = ctx->screenHeight / 2;
+	setBlend(chain, GP0_BLEND_ADD);
+	for (int i = 0; i < count; i++) {
+		int reach = crad[i] + 15;
+		for (int s = 0; s < 5; s++) {
+			int best = 0;
+			for (int trail = 0; trail <= 8; trail++) {
+				int sampleTime = (int) starFrame - (56 * trail) / 8;
+				uint32_t sample = (sampleTime > 0)
+					? (uint32_t) sampleTime : 0;
+				int hx = starHeadX(s, starCx, sample);
+				int hy = starHeadY(s, starCy, sample);
+				int dx = hx - scx[i], dy = hy - scy[i];
+				int d2 = dx * dx + dy * dy;
+				if (d2 < reach * reach) {
+					int prox = 256 - d2 * 256 / (reach * reach);
+					if (prox > best) best = prox;
+				}
+			}
+			if (best > 0) {
+				uint32_t c = scaleColor(
+					gp0_rgb(STARS[s].r, STARS[s].g, STARS[s].b), best);
+				nebulaBlob(chain, scx[i], scy[i], crad[i] + 7, c);
+			}
+		}
 	}
 }
 
@@ -3325,9 +3367,86 @@ static PS_LOGO_SIZE_ATTR void drawLogoPortal(
 		drawLogoOrbitTrails(chain, cx, cy, frame, 78, 54, 24, 32, 6);
 }
 
+/* A single screen-edge comet at a time is pulled into a different point on
+ * C's silhouette. The contact immediately changes into a short radial burst,
+ * then the next colour starts. settledFrame is supplied by the intro/tool,
+ * so the first comet cannot begin until the logo has genuinely stopped for
+ * one full second. */
+static PS_LOGO_SIZE_ATTR void drawLogoAbsorption(
+	GPUDMAChain *chain, int w, int h, int cx, int cy,
+	uint32_t settledFrame
+) {
+	const int waitFrames = 60;
+	const int travelFrames = 42;
+	const int cycleFrames = 64;
+	if (settledFrame < waitFrames)
+		return;
+
+	uint32_t t = settledFrame - waitFrames;
+	int star = (int) ((t / cycleFrames) % 5);
+	int local = (int) (t % cycleFrames);
+	int sx, sy, tx, ty;
+	switch (star) {
+		case 0: sx = 8;     sy = h / 7;     tx = cx - 52; ty = cy - 8;  break;
+		case 1: sx = w - 8; sy = h / 5;     tx = cx + 48; ty = cy - 18; break;
+		case 2: sx = 10;    sy = h - 18;    tx = cx - 38; ty = cy + 46; break;
+		case 3: sx = w - 8; sy = h - 26;    tx = cx + 42; ty = cy + 38; break;
+		default:sx = w / 2; sy = 6;         tx = cx;      ty = cy - 62; break;
+	}
+	uint32_t color = logoRainbowColor(star);
+	setBlend(chain, GP0_BLEND_ADD);
+
+	if (local < travelFrames) {
+		int p = local * 256 / (travelFrames - 1);
+		int inv = 256 - p;
+		int ease = 256 - ((inv * inv) >> 8);
+		for (int seg = 0; seg < 9; seg++) {
+			int p0 = ease - seg * 22;
+			int p1 = ease - (seg + 1) * 22;
+			if (p0 < 0) p0 = 0;
+			if (p1 < 0) p1 = 0;
+			if (p0 == p1) continue;
+			int x0 = sx + (tx - sx) * p0 / 256;
+			int y0 = sy + (ty - sy) * p0 / 256;
+			int x1 = sx + (tx - sx) * p1 / 256;
+			int y1 = sy + (ty - sy) * p1 / 256;
+			int b0 = 256 - seg * 22;
+			int b1 = b0 - 22;
+			shadedLine(chain, x0, y0, scaleColor(color, b0),
+				x1, y1, scaleColor(color, b1), true);
+			if (!seg) {
+				point(chain, x0, y0, 2, color, true);
+				nebulaBlob(chain, x0, y0, 8, scaleColor(color, 150));
+			}
+		}
+		return;
+	}
+
+	/* The comet is gone: only its absorbed contact energy expands outward. */
+	int life = local - travelFrames;
+	int radius = 4 + life * 3;
+	int fade = 256 - life * 10;
+	if (fade < 24) fade = 24;
+	nebulaBlob(chain, tx, ty, 12 + life,
+		scaleColor(color, fade));
+	for (int ray = 0; ray < 12; ray++) {
+		int a = (ray * (WAVE_FULL / 12) + star * 137)
+			& (WAVE_FULL - 1);
+		int inner = radius / 4;
+		int x0 = tx + (icos(a) * inner >> 12);
+		int y0 = ty + (isin(a) * inner >> 12);
+		int x1 = tx + (icos(a) * radius >> 12);
+		int y1 = ty + (isin(a) * radius >> 12);
+		shadedLine(chain, x0, y0, scaleColor(color, fade),
+			x1, y1, gp0_rgb(0, 0, 0), true);
+		if ((ray & 2) == 0)
+			point(chain, x1, y1, 1, scaleColor(color, fade), true);
+	}
+}
+
 static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 	RenderContext *ctx, GPUDMAChain *chain,
-	int effect, int cx, int cy, uint32_t frame
+	int effect, int cx, int cy, uint32_t frame, uint32_t settledFrame
 ) {
 	effect %= PS_LOGO_EFFECT_COUNT;
 	if (effect <= 0)
@@ -3413,13 +3532,17 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 			drawLogoOrbitTrails(chain, cx, cy, frame, 73, 51, 30, 38, 6);
 			break;
 		case 18: /* only small, slow glass cube satellites */
-			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 6);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
+				6, 100, 0, false);
 			break;
-		case 19: /* compact cosmos centred on C plus true glass cubes */
+		case 19: /* screen-fixed cosmos plus widely orbiting logo cubes */
 			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
-			drawNebulaMorph(chain, cx, cy + 5, frame);
-			drawStars(chain, cx, cy + 5, frame * 2);
-			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 5);
+			drawNebulaMorph(chain,
+				ctx->screenWidth / 2, ctx->screenHeight / 2, frame);
+			drawStars(chain,
+				ctx->screenWidth / 2, ctx->screenHeight / 2, frame * 2);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
+				6, 165, frame * 2, true);
 			break;
 		case 20: /* tight comet halo */
 			nebulaBlob(chain, cx, cy + 5, 65, gp0_rgb(8, 18, 45));
@@ -3432,7 +3555,8 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 				gp0_rgb(185, 65, 255), 1);
 			break;
 		case 22: /* crystalline orbit: glass chips and ice motes */
-			drawLogoGlassSatellites(ctx, chain, cx, cy, frame, 4);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
+				4, 100, 0, false);
 			drawLogoSpiralParticles(chain, cx, cy, frame,
 				gp0_rgb(155, 225, 255), 1);
 			break;
@@ -3448,6 +3572,15 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 		case 26: /* maximum-colour vortex */
 			drawLogoPortal(chain, cx, cy, frame, true);
 			break;
+		case 27: /* delayed one-by-one absorption and contact fireworks */
+			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
+			drawNebulaMorph(chain,
+				ctx->screenWidth / 2, ctx->screenHeight / 2, frame);
+			drawLogoGlassSatellites(ctx, chain, cx, cy, frame,
+				6, 165, 0, false);
+			drawLogoAbsorption(chain, ctx->screenWidth, ctx->screenHeight,
+				cx, cy, settledFrame);
+			break;
 	}
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
@@ -3456,7 +3589,7 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,
-	int effect, int anim, uint32_t fxFrame
+	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -3464,7 +3597,8 @@ void xmbDrawIntroPSLogo(
 		model = 0;
 
 	if (model == 2)
-		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy, fxFrame);
+		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy,
+			fxFrame, settledFrame);
 
 	setupCosmosGTE(ctx->screenWidth, ctx->screenHeight);
 	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
