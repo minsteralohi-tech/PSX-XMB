@@ -96,9 +96,11 @@ JOBS = [
     #
     # Wider than it used to be: at 80 across, this logotype's strokes landed
     # around two pixels and most of the word was antialiasing rather than ink.
-    # 96 is closer to what the BIOS screen shows and gives the letterforms
-    # enough pixels to be crisp; the master's aspect is preserved.
-    ("orig_intro_pstext.png",   "intro_pstext.png",    96, 21,  96, 24,
+    # The word is now 96 across - closer to what the BIOS screen shows, and
+    # enough pixels for the letterforms to be crisp - and 107 is that plus the
+    # trademark mark, which is composited into the master rather than drawn as
+    # a second sprite. One texture, one CLUT, one draw, centred as a unit.
+    ("orig_intro_pstext.png",   "intro_pstext.png",   107, 21, 112, 24,
      PS_FIELD, PS_INK, CONTRAST_HARD),
 ]
 
