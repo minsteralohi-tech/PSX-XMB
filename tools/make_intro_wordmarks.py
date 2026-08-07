@@ -8,11 +8,15 @@ diagonal and curve as a bare staircase - which is precisely why the wordmarks
 looked pixelated next to the real BIOS screen. The BIOS art is antialiased.
 That, not resolution, is the difference.
 
-This reads the one-bit masters in assets/orig_intro_*.png, resamples them to
-the sizes measured off a real BIOS screen, and writes assets/intro_*.png with
-the antialiasing baked into fifteen opaque grey levels ramping from the SCE
-screen's white down to the ink. Index 0 stays fully transparent, so the sprite
-still has no background box around it.
+This reads the masters in assets/orig_intro_*.png - high-resolution artwork,
+around ten times the final size, with the shape in the alpha channel -
+resamples them to the sizes measured off a real BIOS screen, and writes
+assets/intro_*.png with the antialiasing baked into fifteen opaque levels
+ramping from the field colour to the ink. Index 0 stays fully transparent, so
+the sprite still has no background box around it.
+
+assets/orig_intro_sony.png is itself generated, from assets/sony_logo.svg -
+tools/svg2png.py renders it. The other three are supplied artwork.
 
 Sixteen distinct colours exactly: the most 4bpp can hold, and the most
 tools/convertImage.py will accept. Do not add a level.
@@ -22,6 +26,7 @@ tools/convertImage.py will accept. Do not add a level.
 Requires Pillow. Run from the repository root; overwrites assets/intro_*.png.
 """
 
+import math
 import os
 import sys
 
@@ -43,8 +48,15 @@ INK   = ( 18,  45,  80)
 PS_FIELD = (0, 0, 0)
 PS_INK   = (255, 255, 255)
 
-LEVELS  = 15   # non-transparent palette entries; 15 + transparent = 16
-SUBSAMP = 6    # samples per axis inside each destination pixel
+LEVELS = 15    # non-transparent palette entries; 15 + transparent = 16
+
+# Samples per axis inside each destination pixel. Chosen per job from the
+# scale factor rather than fixed: the masters are around 10x the target, so one
+# output pixel covers over a hundred source pixels and a fixed 6x6 would miss
+# most of them - thin strokes would flicker in and out depending on where the
+# samples happened to land.
+SUBSAMP_MIN = 6
+SUBSAMP_MAX = 16
 
 # master, output, artwork w/h, padded texture w/h.
 #
@@ -63,13 +75,8 @@ JOBS = [
     ("orig_intro_computer.png", "intro_computer.png", 120, 11, 128, 16, FIELD, INK),
     ("orig_intro_enter.png",    "intro_enter.png",    124, 10, 128, 16, FIELD, INK),
     ("orig_intro_tm.png",       "intro_tm.png",        14,  7,  16, 16, FIELD, INK),
-    # The PlayStation wordmark. Its master is still the original 80x18 bitmap,
-    # which is SMALLER than the target - there is no detail in it to recover,
-    # so this job is skipped with a warning until a proper high-resolution
-    # master is dropped in. Replace assets/orig_intro_pstext.png with one and
-    # re-run; then update PSTX_DW/PSTX_DH/PSTX_W/PSTX_H in
-    # src/main/intro_ps1.c to 97/18/112/24 to match.
-    ("orig_intro_pstext.png",   "intro_pstext.png",    97, 18, 112, 24, PS_FIELD, PS_INK),
+    # The PlayStation wordmark, on the black screen rather than the SCE one.
+    ("orig_intro_pstext.png",   "intro_pstext.png",    80, 18,  80, 24, PS_FIELD, PS_INK),
 ]
 
 
@@ -101,15 +108,16 @@ def resample(src, dw, dh, pw, ph, field, ink):
 
     xs = w / dw
     ys = h / dh
-    n  = SUBSAMP * SUBSAMP
+    sub = min(SUBSAMP_MAX, max(SUBSAMP_MIN, math.ceil(max(xs, ys))))
+    n = sub * sub
 
     for y in range(dh):
         for x in range(dw):
             acc = 0.0
-            for j in range(SUBSAMP):
-                fy = (y + (j + 0.5) / SUBSAMP) * ys
-                for i in range(SUBSAMP):
-                    fx = (x + (i + 0.5) / SUBSAMP) * xs
+            for j in range(sub):
+                fy = (y + (j + 0.5) / sub) * ys
+                for i in range(sub):
+                    fx = (x + (i + 0.5) / sub) * xs
                     acc += sample(mask, w, h, fx, fy)
 
             level = round(acc / n * LEVELS)
