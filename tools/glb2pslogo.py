@@ -187,35 +187,37 @@ MODELS = [
         # This does not lift or resize it; it only settles the painter's sort
         # so the yellow plate cannot peek through the P's lower front edge.
         "camera_forward": (2, 18.0),
-        # The annotated reference asks for narrow contour shadows, not a broad
-        # Lambert or screen-right gradient. Add a slim overlay strip to the
-        # specified front-cap boundaries of the P and along the S's lower
-        # outer contour. All five R1 choices use that exact path and vary only
-        # the darkness.
-        "trace_pose": (23.0, 8.0, 4.0),
-        "trace_shadow": True,
-        "trace_width": 6.0,
-        "trace_depth": 2.0,
+        # Reproduce the Blender reference with the geometry's REAL extrusion
+        # faces. Large P/S caps remain flat; only their side walls receive a
+        # directional Lambert bake, with extra occlusion inside the P cutout.
+        # No artificial contour strips or screen-position gradients are used.
+        "shadow_pose": (23.0, 8.0, 4.0),
+        "blender_shadow": True,
         "shadow_variants": [
             {
-                "name": "TRACE SOFT",
-                "trace_floor": 0.82,
+                "name": "BLENDER REF",
+                "light": (-0.55, -0.65, -0.52),
+                "ambient": 0.38, "inner_ao": 0.62,
             },
             {
-                "name": "TRACE BIOS",
-                "trace_floor": 0.70,
+                "name": "SOFT RIMS",
+                "light": (-0.55, -0.65, -0.52),
+                "ambient": 0.56, "inner_ao": 0.72,
             },
             {
-                "name": "TRACE MEDIUM",
-                "trace_floor": 0.60,
+                "name": "TOP LEFT",
+                "light": (-0.72, -0.64, -0.27),
+                "ambient": 0.40, "inner_ao": 0.62,
             },
             {
-                "name": "TRACE DARK",
-                "trace_floor": 0.50,
+                "name": "FRONT SOFT",
+                "light": (-0.34, -0.69, -0.64),
+                "ambient": 0.45, "inner_ao": 0.68,
             },
             {
-                "name": "TRACE DEEP",
-                "trace_floor": 0.38,
+                "name": "DEEP EDGES",
+                "light": (-0.55, -0.65, -0.52),
+                "ambient": 0.25, "inner_ao": 0.52,
             },
         ],
         # Twice the previous 330-unit posed extent. This is a uniform scale;
@@ -675,10 +677,10 @@ def convert(spec, assets, models_dir):
         " *",
         " * Baked in: the resting pose, the shift that stops the two parts",
         (" * intersecting, and winding to suit GTE_CMD_NCLIP. Base colours are"
-         if spec.get("trace_shadow") else
+         if spec.get("trace_shadow") or spec.get("blender_shadow") else
          " * intersecting, and winding to suit GTE_CMD_NCLIP. Colours are flat"),
         (" * flat per sub-mesh; optional tables carry prebaked contour shadows."
-         if spec.get("trace_shadow") else
+         if spec.get("trace_shadow") or spec.get("blender_shadow") else
          " * per sub-mesh - no shading. The intro only scales them for its fade."),
         " */",
         "",
@@ -706,6 +708,54 @@ def convert(spec, assets, models_dir):
             (min(v[a] for v in mv) + max(v[a] for v in mv)) / 2
             for a in range(3)
         ))
+
+    def unit_face_normal(points, face):
+        v0, v1, v2 = face[:3]
+        a, b, c = points[v0], points[v1], points[v2]
+        u = [b[k] - a[k] for k in range(3)]
+        w = [c[k] - a[k] for k in range(3)]
+        n = [u[1] * w[2] - u[2] * w[1],
+             u[2] * w[0] - u[0] * w[2],
+             u[0] * w[1] - u[1] * w[0]]
+        nl = math.sqrt(sum(t * t for t in n))
+        if nl < 1e-12:
+            return (0.0, 0.0, 0.0)
+        return tuple(t / nl for t in n)
+
+    # Normals for the Blender-style C bake. `verts` is still in the supplied
+    # GLB's source frame, where the S caps point along Y and the P caps along
+    # the diagonal (1, 0, -1). `shadow_view` applies the current hardware pose
+    # so the directional light is described in visible screen coordinates.
+    blender_source_normals = None
+    blender_view_normals = None
+    blender_view = None
+    blender_centers = None
+
+    if spec.get("blender_shadow"):
+        yaw, pitch, roll = spec.get("shadow_pose", (0.0, 0.0, 0.0))
+        sy, cy = math.sin(math.radians(yaw)), math.cos(math.radians(yaw))
+        sp, cp = math.sin(math.radians(pitch)), math.cos(math.radians(pitch))
+        sr, cr = math.sin(math.radians(roll)), math.cos(math.radians(roll))
+        blender_view = []
+        for x, y, z in posed:
+            x1 = cy * x + sy * z
+            z1 = -sy * x + cy * z
+            y2 = cp * y - sp * z1
+            z2 = sp * y + cp * z1
+            blender_view.append((cr * x1 - sr * y2,
+                                 sr * x1 + cr * y2, z2))
+
+        blender_source_normals = [unit_face_normal(verts, face)
+                                  for face in faces]
+        blender_view_normals = [unit_face_normal(blender_view, face)
+                                for face in faces]
+        blender_centers = []
+        for mi in range(len(spec["colors"])):
+            mv = [blender_view[i] for i, o in enumerate(owner) if o == mi]
+            blender_centers.append(tuple(
+                (min(v[a] for v in mv) + max(v[a] for v in mv)) / 2
+                for a in range(3)
+            ))
 
     def build_face_colors(variant):
         """Return one RGB triple per face for a shadow-bake configuration."""
@@ -742,6 +792,46 @@ def convert(spec, assets, models_dir):
             screen_lo, screen_hi = min(screen_x), max(screen_x)
 
         for fi, (v0, v1, v2, mi) in enumerate(faces):
+            if cfg.get("blender_shadow"):
+                source_n = blender_source_normals[fi]
+                if mi == spec["shift"][0]:
+                    inv_sqrt2 = 1.0 / math.sqrt(2.0)
+                    cap_dot = abs(source_n[0] * inv_sqrt2
+                                  - source_n[2] * inv_sqrt2)
+                else:
+                    cap_dot = abs(source_n[1])
+
+                # Keep the large artwork caps perfectly flat. Everything not
+                # parallel to a cap is a real extrusion/bevel face and gets
+                # the same ambient + directional response seen in Blender.
+                k = 1.0
+                if cap_dot < 0.92:
+                    n = tuple(-t for t in blender_view_normals[fi])
+                    lambert = max(0.0, sum(n[a] * light[a]
+                                           for a in range(3)))
+                    ambient = cfg.get("ambient", 0.4)
+                    k = ambient + (1.0 - ambient) * lambert
+
+                    # The inner P cutout is naturally more occluded than its
+                    # outer silhouette. Detect it geometrically, rather than
+                    # by screen side, so the dark wall follows the full hole.
+                    if mi == spec["shift"][0]:
+                        fc = tuple(sum(blender_view[v][a]
+                                       for v in (v0, v1, v2)) / 3
+                                   for a in range(3))
+                        radial = sum(
+                            n[a] * (fc[a] - blender_centers[mi][a])
+                            for a in range(3)
+                        )
+                        if radial > 0:
+                            k *= cfg.get("inner_ao", 0.65)
+
+                colors.append(tuple(
+                    min(255, max(0, round(ch * k)))
+                    for ch in spec["colors"][mi]
+                ))
+                continue
+
             if cfg.get("trace_shadow"):
                 k = cfg.get("trace_floor", 0.7) if fi in trace_faces else 1.0
                 colors.append(tuple(
