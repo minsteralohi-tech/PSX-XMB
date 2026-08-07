@@ -168,20 +168,21 @@ MODELS = [
         "prefix":     "psLogoBios3",
         "macro":      "PS_LOGO_BIOS3",
         "note":       "logo C - the newly supplied full-resolution BIOS model",
-        # This source contains the same four-part, upright-P/flat-swoosh mesh
-        # layout as B. Keep every vertex and triangle, and apply the reference-
-        # tuned BIOS treatment independently so future C adjustments do not
-        # disturb the shipping model B.
+        # Preserve the newly supplied model's original geometry. In particular,
+        # do NOT inherit B's 1.6x swoosh growth, ribbon erosion, plate thinning,
+        # or P/plate separation. The only geometric operations after import are
+        # coordinate conversion, a uniform fixed-point scale and the baked BIOS
+        # viewing rotation; none changes the model's proportions.
         "mirror_z":   True,
         "bake_yaw":   -25.0,
         "bake_pitch":  12.0,
         "scale":       13.0,
         "colors":     [BIOS_REF_BLUE, BIOS_REF_TEAL,
                        BIOS_REF_RED, BIOS_REF_YELLOW],
-        "shift":      (2, 1, 0.682),
-        "swoosh":     ([0, 1, 3], 2, 1.6),
-        "swoosh_thin": 0.7,
-        "swoosh_erode": 1.0,
+        "shift":      (2, 1, 0.0),
+        "swoosh":     ([0, 1, 3], 2, 1.0),
+        "swoosh_thin": 1.0,
+        "swoosh_erode": 0.0,
     },
 ]
 
