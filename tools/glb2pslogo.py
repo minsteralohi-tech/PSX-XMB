@@ -168,26 +168,40 @@ MODELS = [
         "prefix":     "psLogoBios3",
         "macro":      "PS_LOGO_BIOS3",
         "note":       "logo C - the newly supplied full-resolution BIOS model",
-        # Preserve the newly supplied model's original geometry. In particular,
-        # do NOT inherit B's 1.6x swoosh growth, ribbon erosion, plate thinning,
-        # or P/plate separation. The only geometric operations after import are
-        # coordinate conversion, a uniform fixed-point scale and the baked BIOS
-        # viewing rotation; none changes the model's proportions.
+        # Preserve the newly supplied model's original proportions. In
+        # particular, do NOT inherit B's 1.6x swoosh growth, ribbon erosion or
+        # plate thinning. The only non-uniform edit is the measured P lift below
+        # that removes an actual intersection without reshaping either part.
         "mirror_z":   True,
         "bake_yaw":   -25.0,
         "bake_pitch":  12.0,
         "scale":       13.0,
         "colors":     [BIOS_REF_BLUE, BIOS_REF_TEAL,
                        BIOS_REF_RED, BIOS_REF_YELLOW],
-        "shift":      (2, 1, 0.0),
+        # C retains the source plate thickness, so its top is 0.820 source
+        # units above the P's lowest point. Lift only the P by that exact
+        # amount: the parts touch edge-to-edge without the intersection that
+        # lets a yellow face win the painter sort across the red foot.
+        "shift":      (2, 1, 0.820),
         "swoosh":     ([0, 1, 3], 2, 1.0),
         "swoosh_thin": 1.0,
         "swoosh_erode": 0.0,
+        # Shade only each sub-mesh's OUTER boundary. The earlier generic rim
+        # Lambert shaded the cutout walls too, which put the dark band on the
+        # logo's internal edges. With the internal rims excluded, this light
+        # places the BIOS-style dark band on the outside-right/bottom edges.
+        # These overrides apply to C only.
+        "light":       (0.6, -0.6, -0.53),
+        "rim_base":    0.42,
+        "shade_outer_only": True,
+        # Twice the previous 330-unit posed extent. This is a uniform scale;
+        # it does not alter C's original proportions.
+        "target_extent": 660.0,
     },
 ]
 
-# Every model is normalised to this posed extent, so they draw the same size
-# and the intro's PS_LOGO_*_CAM_Z stays valid when switching between them.
+# Default posed extent used by A/B. A model can override this; C requests 660
+# so its whole object is exactly 2x the old 330-unit pose-tool size.
 TARGET_EXTENT = 330.0
 
 # Rim shading, baked in the resting pose. LIGHT points from the surface toward
@@ -395,12 +409,13 @@ def convert(spec, assets, models_dir):
     posed = [tuple(p[a] - (blo[a] + bhi[a]) / 2 for a in range(3))
              for p in posed]
 
-    # Normalise to a fixed posed extent. Enlarging the swoosh grows the whole
-    # bounding box, which would silently change how big the logo draws and
-    # invalidate the pose tool's CAM Z; this keeps the models interchangeable.
+    # Normalise to the model's requested posed extent. A/B use the shared 330
+    # default so they remain interchangeable; C explicitly requests 660 for a
+    # 2x pose-tool/render size.
     extent = max(bhi[0] - blo[0], bhi[1] - blo[1])
-    if extent > 0:
-        k = TARGET_EXTENT / extent
+    target_extent = spec.get("target_extent", TARGET_EXTENT)
+    if extent > 0 and target_extent > 0:
+        k = target_extent / extent
         posed = [tuple(c * k for c in p) for p in posed]
 
     # Winding: the NCLIP swap and the Z mirror's handedness flip cancel out,
@@ -435,8 +450,24 @@ def convert(spec, assets, models_dir):
     lines += ["};", "",
               f"static const PSLogoFace {prefix}Faces[{macro}_FACE_COUNT] = {{"]
 
-    ln = math.sqrt(sum(c * c for c in LIGHT))
-    light = tuple(c / ln for c in LIGHT)
+    model_light = spec.get("light", LIGHT)
+    flat_dot = spec.get("flat_dot", FLAT_DOT)
+    rim_base = spec.get("rim_base", RIM_BASE)
+    shade_outer_only = spec.get("shade_outer_only", False)
+    ln = math.sqrt(sum(c * c for c in model_light))
+    light = tuple(c / ln for c in model_light)
+
+    # Per-sub-mesh centres let C distinguish the outside silhouette from hole
+    # and cutout walls. With this file's exported winding the normal below
+    # points toward the solid: on an outer rim its dot with (face-centre minus
+    # mesh-centre) is negative; on an internal rim it is positive.
+    mesh_centers = []
+    for mi in range(len(spec["colors"])):
+        mv = [posed[i] for i, o in enumerate(owner) if o == mi]
+        mesh_centers.append(tuple(
+            (min(v[a] for v in mv) + max(v[a] for v in mv)) / 2
+            for a in range(3)
+        ))
 
     for v0, v1, v2, mi in faces:
         # Edge-only rim shading. A face pointing within FLAT_DOT of the camera
@@ -455,9 +486,19 @@ def convert(spec, assets, models_dir):
         n = [-t / nl for t in n]
 
         k = 1.0
-        if abs(n[2]) < FLAT_DOT:
-            lam = max(0.0, sum(p * q for p, q in zip(n, light)))
-            k = RIM_BASE + (1.0 - RIM_BASE) * lam
+        if abs(n[2]) < flat_dot:
+            shade = True
+            if shade_outer_only:
+                fc = tuple((a3[a] + b3[a] + c3[a]) / 3 for a in range(3))
+                radial = sum(
+                    n[a] * (fc[a] - mesh_centers[mi][a])
+                    for a in range(3)
+                )
+                shade = radial < 0
+
+            if shade:
+                lam = max(0.0, sum(p * q for p, q in zip(n, light)))
+                k = rim_base + (1.0 - rim_base) * lam
 
         r, g, b = (min(255, round(ch * k)) for ch in spec["colors"][mi])
         a, c = (v2, v1) if swap else (v1, v2)
