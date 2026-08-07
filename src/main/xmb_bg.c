@@ -2581,7 +2581,7 @@ typedef struct {
 static void drawPSLogoFaces(
 	GPUDMAChain *chain,
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
-	int bright
+	int bright, const uint8_t *shadeColors
 ) {
 	static PSLogoDrawFace drawFaces[PS_LOGO_MAX_FACES];
 	int ndraw = 0;
@@ -2626,12 +2626,13 @@ static void drawPSLogoFaces(
 		if (z > zMax) zMax = z;
 
 		PSLogoDrawFace *df = &drawFaces[ndraw++];
+		const uint8_t *color = shadeColors ? &shadeColors[i * 3] : NULL;
 		df->xy0 = xy0;
 		df->xy1 = xy1;
 		df->xy2 = xy2;
-		df->r   = (uint8_t) ((face->r * bright) >> 8);
-		df->g   = (uint8_t) ((face->g * bright) >> 8);
-		df->b   = (uint8_t) ((face->b * bright) >> 8);
+		df->r   = (uint8_t) (((color ? color[0] : face->r) * bright) >> 8);
+		df->g   = (uint8_t) (((color ? color[1] : face->g) * bright) >> 8);
+		df->b   = (uint8_t) (((color ? color[2] : face->b) * bright) >> 8);
 		df->z   = z;
 	}
 
@@ -2686,7 +2687,8 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 	cosmosRotate(0, yaw, 0);
 	cosmosRotate(0, 0, roll);
 
-	drawPSLogoFaces(chain, psLogoVertices, psLogoFaces, PS_LOGO_FACE_COUNT, 256);
+	drawPSLogoFaces(chain, psLogoVertices, psLogoFaces,
+		PS_LOGO_FACE_COUNT, 256, NULL);
 	return yaw;
 }
 
@@ -2732,20 +2734,45 @@ static const struct {
 	const PSLogoFace   *faces;
 	int                 faceCount;
 	int                 projectionScale;
+	const uint8_t      *shadeColors;
+	int                 shadeCount;
+	const char *const  *shadeNames;
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
-	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT,  1 },
-	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT, 1 },
+	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT,
+	  1, NULL, 1, NULL },
+	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT,
+	  1, NULL, 1, NULL },
 	/*
 	 * C uses weak perspective. Multiplying H and TRZ by the same value keeps
 	 * the centre-plane size for a given CAM Z, while making depth variation
 	 * eight times less able to enlarge the P and shrink the receding S.
 	 */
-	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT, 8 },
+	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT,
+	  8, &psLogoBios3ShadeColors[0][0][0], PS_LOGO_BIOS3_SHADE_COUNT,
+	  psLogoBios3ShadeNames },
 };
+
+int xmbIntroPSLogoShadeCount(int model) {
+	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT)
+		return 1;
+	return introLogos[model].shadeCount;
+}
+
+const char *xmbIntroPSLogoShadeName(int model, int shade) {
+	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT
+	 || !introLogos[model].shadeNames)
+		return "DEFAULT";
+
+	int count = introLogos[model].shadeCount;
+	shade %= count;
+	if (shade < 0)
+		shade += count;
+	return introLogos[model].shadeNames[shade];
+}
 
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
-	int yaw, int pitch, int roll, int bright
+	int yaw, int pitch, int roll, int bright, int shade
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -2792,8 +2819,18 @@ void xmbDrawIntroPSLogo(
 		cosmosRotate(0, 0, pitch & 4095);   /* slot 3 turns about X */
 	cosmosRotate(0, yaw & 4095, 0);         /* slot 2 turns about Y */
 
+	const uint8_t *shadeColors = NULL;
+	if (introLogos[model].shadeColors) {
+		int count = introLogos[model].shadeCount;
+		shade %= count;
+		if (shade < 0)
+			shade += count;
+		shadeColors = introLogos[model].shadeColors
+			+ shade * introLogos[model].faceCount * 3;
+	}
+
 	drawPSLogoFaces(chain, introLogos[model].verts, introLogos[model].faces,
-		introLogos[model].faceCount, bright);
+		introLogos[model].faceCount, bright, shadeColors);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------

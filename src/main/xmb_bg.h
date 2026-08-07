@@ -181,9 +181,13 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
 #define XMB_INTRO_LOGO_COUNT 3
 extern const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT];
 
+/* C exposes several baked face-colour/shadow comparisons in the pose tool. */
+int xmbIntroPSLogoShadeCount(int model);
+const char *xmbIntroPSLogoShadeName(int model, int shade);
+
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
-	int yaw, int pitch, int roll, int bright
+	int yaw, int pitch, int roll, int bright, int shade
 );
 
 /*
