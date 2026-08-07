@@ -94,6 +94,13 @@ The old SONY was 160 wide, wider than the diamond; the real one is narrower.
 COMPUTER was 16 tall against ENTERTAINMENT's 11, so the two lines did not
 match each other and collided on screen.
 
+The screen is also not white. The BIOS field is a flat mid grey (`SCE_FIELD`
+in `intro_ps1.c`, currently 168,168,168) with the wordmarks in a dark navy
+(18,45,80), not black on white. That matters beyond looking right: on a grey
+field there is headroom above the background, so the White Ribbons variant's
+ribbons and sparkles can be drawn *additively* and come out whiter than the
+backdrop. On pure white they had to be subtracted, which made them greyer.
+
 They were also two-colour art — one transparent index, one ink index — which
 wastes fourteen of a 4bpp palette's sixteen entries and leaves every curve a
 bare staircase. **That, not resolution, is why they looked pixelated next to

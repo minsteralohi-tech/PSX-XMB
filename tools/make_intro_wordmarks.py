@@ -27,11 +27,16 @@ import sys
 
 from PIL import Image
 
-# The white the antialiasing blends toward, and the ink it blends from. WHITE
-# is the SCE screen's background - the ramp is baked against it, so these
-# sprites belong on a white field and nowhere else.
-WHITE = 255
-INK   = 15
+# The field the antialiasing blends toward, and the ink it blends from.
+#
+# FIELD is the SCE screen's background colour, and the ramp is baked against
+# it, so these sprites belong on that exact field and nowhere else. Both are
+# sampled off the BIOS reference: a mid grey, not white, with navy text rather
+# than black. Change these two and re-run - the intro's own SCE_FIELD in
+# src/main/intro_ps1.c has to be changed to match, or the sprites will sit in
+# visible boxes.
+FIELD = (168, 168, 168)
+INK   = ( 18,  45,  80)
 
 LEVELS  = 15   # non-transparent palette entries; 15 + transparent = 16
 SUBSAMP = 6    # samples per axis inside each destination pixel
@@ -102,8 +107,9 @@ def resample(src, dw, dh, pw, ph):
             # Opaque, not semi-transparent: the PS1 has no per-texel alpha
             # ramp, only a single semi-transparency bit, so the blend toward
             # the background has to be baked into the colour itself.
-            v = round(WHITE + (INK - WHITE) * level / LEVELS)
-            px[x, y] = (v, v, v, 255)
+            px[x, y] = tuple(
+                round(f + (i - f) * level / LEVELS) for f, i in zip(FIELD, INK)
+            ) + (255,)
 
     return out
 
