@@ -58,6 +58,19 @@ LEVELS = 15    # non-transparent palette entries; 15 + transparent = 16
 SUBSAMP_MIN = 6
 SUBSAMP_MAX = 16
 
+# Edge contrast. Coverage is pushed away from the middle before it is
+# quantised: c' = (c - 0.5) * CONTRAST + 0.5, clamped. 1.0 leaves it linear.
+#
+# Above 1.0 narrows the antialiased band - fewer half-lit pixels, more that are
+# fully ink or fully field - which reads as sharper. Worth it where the artwork
+# is set against a strong contrast and the soft band shows as a halo, which is
+# what made the PlayStation wordmark look blurry next to the dashboard's own
+# hard-edged bitmap font. Not worth it on the SCE wordmarks: navy on grey is a
+# gentle enough step that the linear ramp already looks clean, and hardening it
+# would just put the staircase back.
+CONTRAST_SOFT = 1.0
+CONTRAST_HARD = 2.2
+
 # master, output, artwork w/h, padded texture w/h.
 #
 # Artwork sizes are measured off a real BIOS screen. The old ones came from
@@ -71,12 +84,22 @@ SUBSAMP_MAX = 16
 # src/main/intro_ps1.c for why a short DMA transfer is fatal rather than
 # merely wrong.
 JOBS = [
-    ("orig_intro_sony.png",     "intro_sony.png",     115, 19, 128, 24, FIELD, INK),
-    ("orig_intro_computer.png", "intro_computer.png", 120, 11, 128, 16, FIELD, INK),
-    ("orig_intro_enter.png",    "intro_enter.png",    124, 10, 128, 16, FIELD, INK),
-    ("orig_intro_tm.png",       "intro_tm.png",        14,  7,  16, 16, FIELD, INK),
+    ("orig_intro_sony.png",     "intro_sony.png",     115, 19, 128, 24,
+     FIELD, INK, CONTRAST_SOFT),
+    ("orig_intro_computer.png", "intro_computer.png", 120, 11, 128, 16,
+     FIELD, INK, CONTRAST_SOFT),
+    ("orig_intro_enter.png",    "intro_enter.png",    124, 10, 128, 16,
+     FIELD, INK, CONTRAST_SOFT),
+    ("orig_intro_tm.png",       "intro_tm.png",        14,  7,  16, 16,
+     FIELD, INK, CONTRAST_SOFT),
     # The PlayStation wordmark, on the black screen rather than the SCE one.
-    ("orig_intro_pstext.png",   "intro_pstext.png",    80, 18,  80, 24, PS_FIELD, PS_INK),
+    #
+    # Wider than it used to be: at 80 across, this logotype's strokes landed
+    # around two pixels and most of the word was antialiasing rather than ink.
+    # 96 is closer to what the BIOS screen shows and gives the letterforms
+    # enough pixels to be crisp; the master's aspect is preserved.
+    ("orig_intro_pstext.png",   "intro_pstext.png",    96, 21,  96, 24,
+     PS_FIELD, PS_INK, CONTRAST_HARD),
 ]
 
 
@@ -98,7 +121,7 @@ def sample(mask, w, h, fx, fy):
     return acc
 
 
-def resample(src, dw, dh, pw, ph, field, ink):
+def resample(src, dw, dh, pw, ph, field, ink, contrast):
     """Box-filter `src`'s alpha down to dw x dh, into a pw x ph RGBA image."""
     w, h = src.size
     mask = [a / 255.0 for a in src.convert("RGBA").getdata(3)]
@@ -120,7 +143,11 @@ def resample(src, dw, dh, pw, ph, field, ink):
                     fx = (x + (i + 0.5) / sub) * xs
                     acc += sample(mask, w, h, fx, fy)
 
-            level = round(acc / n * LEVELS)
+            cov = acc / n
+            if contrast != 1.0:
+                cov = min(1.0, max(0.0, (cov - 0.5) * contrast + 0.5))
+
+            level = round(cov * LEVELS)
             if level <= 0:
                 continue
 
@@ -138,7 +165,7 @@ def main():
     root   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(root, "assets")
 
-    for master, name, dw, dh, pw, ph, field, ink in JOBS:
+    for master, name, dw, dh, pw, ph, field, ink, contrast in JOBS:
         path = os.path.join(assets, master)
         if not os.path.exists(path):
             sys.exit(f"missing master: {path}")
@@ -156,7 +183,7 @@ def main():
                 )
                 continue
 
-            out = resample(src, dw, dh, pw, ph, field, ink)
+            out = resample(src, dw, dh, pw, ph, field, ink, contrast)
 
         colors = len(set(out.getdata()))
         if colors > 16:

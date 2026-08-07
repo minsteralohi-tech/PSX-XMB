@@ -33,10 +33,31 @@ WHAT THIS DOES BEYOND UNPACKING VERTICES
    sign convention. Swapping vertices 1 and 2 reconciles them - without it the
    logo renders inside out, showing only its back faces.
 
-5. Replaces the materials' colours. The GLB's baseColorFactors are linear and
+5. Thickens each sub-mesh along its own thinnest axis. The source geometry is
+   a 2-unit-thick relief on a 72-unit-wide logo, which reads as a sticker; the
+   BIOS logo has a real extruded edge. The axis differs per part - the P is
+   thin in Z, the three swoosh slabs are thin in Y - so this finds each
+   sub-mesh's thinnest extent and scales about that sub-mesh's own mid-plane.
+
+6. Bakes flat per-face shading. The faces are drawn as flat GPU triangles with
+   no lighting, so without this the extruded sides are the same colour as the
+   front and the whole thing reads flat. One Lambert term against a fixed
+   light, folded into the face colour.
+
+   Because it is baked in the resting pose, the lighting turns with the model
+   during the intro's swing-in rather than staying fixed in the world. At this
+   size and speed that is invisible, and it costs nothing at runtime.
+
+7. Replaces the materials' colours. The GLB's baseColorFactors are linear and
    convert to garishly bright sRGB; the flat PlayStation palette is what the
-   BIOS screen actually shows. Material 1 is blue and material 3 yellow, not
-   the reverse: the swoosh slab nearest the camera is its yellow end.
+   BIOS screen actually shows.
+
+   MATERIAL ORDER IS THE FILE'S OWN, and it matters. An earlier revision
+   swapped materials 1 and 3 from a misread of the BIOS screenshot, which put
+   the red P against the blue end of the swoosh instead of the yellow one. The
+   geometry settles it: the P occupies z 17.5..19.5, inside material 1's slab
+   (6.4..20.8), so material 1 is the end the P stands on - and that end is
+   yellow.
 """
 
 import json
@@ -50,16 +71,28 @@ import sys
 BAKE_YAW   = 22.0
 BAKE_PITCH = 28.0
 
-# Model units per GLB unit. The posed model comes out 326 units across, which
+# Model units per GLB unit. The posed model comes out ~328 units across, which
 # with the intro's camera gives roughly 110 screen pixels.
 SCALE = 4.0
 
-# Per-material RGB: the P, then the swoosh from its far slab to its near one.
+# How much to multiply each sub-mesh's thinnest extent by. 2.6 takes the
+# source's 2-unit relief to ~5.2, which reads like the BIOS logo's extrusion.
+THICKNESS = 2.6
+
+# Flat shading. LIGHT points from the surface toward the light, in the posed
+# frame: X right, Y DOWN (PS1 screen space), Z into the screen - so this is
+# above, left and in front. AMBIENT is what a face pointing away still gets.
+LIGHT   = (-0.35, -0.60, -0.72)
+AMBIENT = 0.45
+DIFFUSE = 0.75
+
+# Per-material RGB, in the GLB's own order: the P, then the swoosh from the
+# slab the P stands on to the far one. See point 7 above before reordering.
 COLORS = [
-    (230,   0,  18),   # red
-    (  0,  90, 170),   # blue    (far)
-    (  0, 168, 150),   # teal
-    (252, 200,   0),   # yellow  (near)
+    (230,   0,  18),   # red     - the P
+    (250, 196,   0),   # yellow  - the slab the P stands on
+    (  0, 166, 148),   # teal
+    (  0,  88, 168),   # blue    - the far end
 ]
 
 
@@ -94,8 +127,9 @@ def main():
     m = gltf["nodes"][0]["matrix"]     # column-major
     verts = []                        # (x, y, z), root transform applied
     faces = []                        # (v0, v1, v2, material)
+    owner = []                        # sub-mesh each vertex came from
 
-    for mesh in gltf["meshes"]:
+    for mi, mesh in enumerate(gltf["meshes"]):
         prim = mesh["primitives"][0]
         acc_p = gltf["accessors"][prim["attributes"]["POSITION"]]
         acc_i = gltf["accessors"][prim["indices"]]
@@ -110,6 +144,7 @@ def main():
                 m[1] * x + m[5] * y + m[9]  * z + m[13],
                 m[2] * x + m[6] * y + m[10] * z + m[14],
             ))
+            owner.append(mi)
 
         idx = struct.unpack_from(f"<{acc_i['count']}I", data, off_i)
         for i in range(0, len(idx), 3):
@@ -117,6 +152,20 @@ def main():
                 base + idx[i], base + idx[i + 1], base + idx[i + 2],
                 prim["material"],
             ))
+
+    # Thicken: per sub-mesh, expand its own thinnest axis about its own
+    # mid-plane. Done before centring so each part keeps its position.
+    for mi in range(len(gltf["meshes"])):
+        mine = [i for i, o in enumerate(owner) if o == mi]
+        lo = [min(verts[i][a] for i in mine) for a in range(3)]
+        hi = [max(verts[i][a] for i in mine) for a in range(3)]
+        axis = min(range(3), key=lambda a: hi[a] - lo[a])
+        mid = (lo[axis] + hi[axis]) / 2
+
+        for i in mine:
+            v = list(verts[i])
+            v[axis] = mid + (v[axis] - mid) * THICKNESS
+            verts[i] = tuple(v)
 
     # Centre, flip Y for screen-down, scale.
     xs = [v[0] for v in verts]
@@ -147,6 +196,33 @@ def main():
     bz = (min(p[2] for p in posed) + max(p[2] for p in posed)) / 2
     posed = [(p[0] - bx, p[1] - by, p[2] - bz) for p in posed]
 
+    # Flat shading, folded into each face's colour.
+    ln = math.sqrt(sum(c * c for c in LIGHT))
+    light = tuple(c / ln for c in LIGHT)
+    shaded = []
+
+    for v0, v1, v2, mat in faces:
+        a, b, c = posed[v0], posed[v1], posed[v2]
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        w = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        n = (
+            u[1] * w[2] - u[2] * w[1],
+            u[2] * w[0] - u[0] * w[2],
+            u[0] * w[1] - u[1] * w[0],
+        )
+        nl = math.sqrt(sum(t * t for t in n)) or 1.0
+        n = [t / nl for t in n]
+
+        # Faces the camera can see point at it, i.e. -Z. Flip the ones that
+        # do not, so the shading is computed for the side actually shown.
+        if n[2] > 0:
+            n = [-t for t in n]
+
+        k = AMBIENT + DIFFUSE * max(0.0, sum(a * b for a, b in zip(n, light)))
+        shaded.append(tuple(
+            min(255, round(ch * k)) for ch in COLORS[mat]
+        ))
+
     lines = [
         "#ifndef PS_LOGO_BIOS_H",
         "#define PS_LOGO_BIOS_H",
@@ -173,8 +249,7 @@ def main():
         lines.append(f"\t{{ {round(x)}, {round(y)}, {round(z)}, 0 }},")
     lines += ["};", "", "static const PSLogoFace psLogoBiosFaces"
               "[PS_LOGO_BIOS_FACE_COUNT] = {"]
-    for v0, v1, v2, mat in faces:
-        r, g, b = COLORS[mat]
+    for (v0, v1, v2, _mat), (r, g, b) in zip(faces, shaded):
         # v2 and v1 swapped: see the winding note above.
         lines.append(f"\t{{ {v0}, {v2}, {v1}, {r}, {g}, {b} }},")
     lines += ["};", "", "#endif // PS_LOGO_BIOS_H", ""]
