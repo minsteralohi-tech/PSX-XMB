@@ -40,6 +40,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "common/sio0.h"
 #include "main/defs.h"
 #include "main/font.h"
@@ -570,33 +571,54 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 
 /* --- the PlayStation (black) screen -----------------------------------
  *
- * Placement and swing-in of the 3D logo.
+ * THE 3D LOGO'S START AND END POSE.
  *
- * The resting pose is baked into the model (see ps_logo_bios.h), so there is
- * no orientation to get right here - at spin 0 it is already the BIOS screen's
- * three-quarter view. What is left is where it sits, how big it is, and how it
- * arrives, and those are tuning knobs:
+ * The animation is a straight interpolation between the two blocks below, so
+ * these twelve numbers ARE the animation - there is nothing else to it. The
+ * pose tool on the boot menu (entry 5) edits exactly these, live, and prints
+ * them back in this form; read them off the screen and paste them here.
  *
- *   CAM_Z 430: the posed model is 326 units across and setupCosmosGTE() sets
- *   H = min(w,h)/2 = 120 at 320x240, so projected width is about
- *   120 * 326 / camZ - roughly 110 pixels, against the ~100 the BIOS shows.
+ * Angles are degrees, offsets from the BIOS resting pose, which is baked into
+ * the model (see ps_logo_bios.h). All three at 0 is the finished orientation,
+ * which is why the END block is all zeroes.
  *
- *   SWING 2200 is a little over half a turn, so the logo genuinely arrives
- *   from behind rather than nudging into place, and it takes SWING_FRAMES to
- *   get there - two seconds rather than the previous 27 frames.
+ *   YAW    turntable, about the vertical Y axis
+ *   PITCH  flip, about the horizontal X axis
+ *   ROLL   spin in the screen plane, about the depth Z axis
+ *   CAM_Z  camera distance; smaller is bigger. The posed model is 326 units
+ *          across and setupCosmosGTE() sets H = min(w,h)/2 = 120 at 320x240,
+ *          so projected width is about 120 * 326 / camZ - 430 gives roughly
+ *          110 pixels, against the ~100 the BIOS screen shows.
+ *   POS    where the model's centre lands on screen, in pixels.
  */
-#define PS_LOGO_CX      160
-#define PS_LOGO_CY       80
-#define PS_LOGO_CAM_Z   430
-#define PS_LOGO_SWING  2200    /* ~193 degrees of swing-in */
+#define DEG(d) (((d) * 4096) / 360)
+
+#define PS_LOGO_START_YAW    193      /* arrives from behind, turning     */
+#define PS_LOGO_START_PITCH  -18      /* and slightly from below          */
+#define PS_LOGO_START_ROLL     0
+#define PS_LOGO_START_CAM_Z  620      /* further away, so it moves toward */
+#define PS_LOGO_START_X      160
+#define PS_LOGO_START_Y       80
+
+#define PS_LOGO_END_YAW        0      /* zero = the BIOS resting pose     */
+#define PS_LOGO_END_PITCH      0
+#define PS_LOGO_END_ROLL       0
+#define PS_LOGO_END_CAM_Z    430
+#define PS_LOGO_END_X        160
+#define PS_LOGO_END_Y         80
 
 /*
- * Frames the swing takes, counted from T_PS_LOGO. Deliberately longer than
- * the brightness fade (T_PS_LOGO..T_PS_LOGO_END, 27 frames): the logo is fully
- * lit well before it stops moving, which is what makes the arrival read as a
+ * Frames the move takes, counted from T_PS_LOGO. Deliberately longer than the
+ * brightness fade (T_PS_LOGO..T_PS_LOGO_END, 27 frames): the logo is fully lit
+ * well before it stops moving, which is what makes the arrival read as a
  * settle rather than a fade.
  */
-#define PS_LOGO_SWING_FRAMES 120
+#define PS_LOGO_MOVE_FRAMES 120
+
+/* Interpolate one value from its start to its end over ease (0..256). */
+static int poseLerp(int from, int to, int ease) {
+	return from + ((to - from) * ease) / 256;
+}
 
 static void drawPsScreen(RenderContext *ctx, int frame) {
 	int logoLevel    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
@@ -616,23 +638,27 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		/*
 		 * The real model, GTE-transformed, rather than a flat sprite.
 		 *
-		 * It swings in from behind over PS_LOGO_SWING_FRAMES and eases to a
-		 * stop in the BIOS pose, which it then holds for the rest of the
-		 * screen. The fade is the same ramp as before, applied to the flat
-		 * face colours instead of to a texture tint.
+		 * It moves from the START pose to the END pose over
+		 * PS_LOGO_MOVE_FRAMES and holds there for the rest of the screen.
+		 * The fade is the same ramp as before, applied to the flat face
+		 * colours instead of to a texture tint.
 		 *
 		 * The ease is cubic rather than the quadratic used for the SCE spin:
 		 * over two seconds a quadratic still arrives visibly quickly, where
-		 * this coasts most of the way round and then settles.
+		 * this coasts most of the way and then settles.
 		 */
-		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO + PS_LOGO_SWING_FRAMES);
+		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO + PS_LOGO_MOVE_FRAMES);
 		int inv  = 256 - k;
-		int ease = (((inv * inv) >> 8) * inv) >> 8;   /* 256 -> 0, cubic */
-		int spin = (PS_LOGO_SWING * ease) >> 8;
+		int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);   /* 0 -> 256 */
 
 		xmbDrawIntroPSLogo(ctx,
-			PS_LOGO_CX, PS_LOGO_CY, PS_LOGO_CAM_Z,
-			spin, clampi(logoLevel, 0, 256));
+			poseLerp(PS_LOGO_START_X,     PS_LOGO_END_X,     ease),
+			poseLerp(PS_LOGO_START_Y,     PS_LOGO_END_Y,     ease),
+			poseLerp(PS_LOGO_START_CAM_Z, PS_LOGO_END_CAM_Z, ease),
+			DEG(poseLerp(PS_LOGO_START_YAW,   PS_LOGO_END_YAW,   ease)),
+			DEG(poseLerp(PS_LOGO_START_PITCH, PS_LOGO_END_PITCH, ease)),
+			DEG(poseLerp(PS_LOGO_START_ROLL,  PS_LOGO_END_ROLL,  ease)),
+			clampi(logoLevel, 0, 256));
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates
@@ -672,18 +698,166 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 	}
 }
 
+/* --- the pose tool ----------------------------------------------------
+ *
+ * A live editor for the twelve numbers above, so the start and end poses can
+ * be dialled in on the console and read straight off the screen instead of
+ * being guessed from a screenshot and rebuilt each time.
+ *
+ * The model is drawn at whichever pose is selected, full brightness, on black.
+ * Everything is in degrees and pixels - the same units the #defines use - so
+ * what the readout shows is what gets pasted back.
+ *
+ * It runs from the boot menu, before initPS1Boot(), which is fine: the logo is
+ * geometry, not a texture, so it needs nothing uploaded.
+ */
+
+/* Field order on screen; also the order of the values[] array below. */
+enum {
+	POSE_YAW, POSE_PITCH, POSE_ROLL, POSE_CAM_Z, POSE_X, POSE_Y,
+	POSE_FIELD_COUNT
+};
+
+static const char *const poseFieldNames[POSE_FIELD_COUNT] = {
+	"YAW   (Y turntable)",
+	"PITCH (X flip)",
+	"ROLL  (Z screen spin)",
+	"CAM Z (smaller=bigger)",
+	"POS X",
+	"POS Y",
+};
+
+/* Per-field limits and the step a single D-pad press moves. */
+static const int poseMin[POSE_FIELD_COUNT]  = { -180, -180, -180,  60,  -64,  -64 };
+static const int poseMax[POSE_FIELD_COUNT]  = {  180,  180,  180, 4000, 384,  304 };
+static const int poseStep[POSE_FIELD_COUNT] = {    1,    1,    1,   10,    1,    1 };
+
+static void tunePS1Logo(RenderContext *ctx) {
+	int pose[2][POSE_FIELD_COUNT] = {
+		{ PS_LOGO_START_YAW, PS_LOGO_START_PITCH, PS_LOGO_START_ROLL,
+		  PS_LOGO_START_CAM_Z, PS_LOGO_START_X, PS_LOGO_START_Y },
+		{ PS_LOGO_END_YAW, PS_LOGO_END_PITCH, PS_LOGO_END_ROLL,
+		  PS_LOGO_END_CAM_Z, PS_LOGO_END_X, PS_LOGO_END_Y },
+	};
+
+	int which = 0;          /* 0 = START, 1 = END */
+	int sel   = 0;
+	int play  = -1;         /* frame of the preview, or -1 when not playing */
+	bool sawRelease = false;
+	uint16_t last = 0;
+
+	for (;;) {
+		uint16_t buttons = pollController(0) | pollController(1);
+		uint16_t pressed = buttons & ~last;
+
+		last = buttons;
+
+		if (!buttons)
+			sawRelease = true;
+
+		if (sawRelease) {
+			if (pressed & PAD_BTN_CIRCLE)
+				break;
+			if (pressed & PAD_BTN_TRIANGLE)
+				which ^= 1;
+			if (pressed & PAD_BTN_SQUARE)
+				play = 0;
+			if (pressed & PAD_BTN_UP)
+				sel = (sel + POSE_FIELD_COUNT - 1) % POSE_FIELD_COUNT;
+			if (pressed & PAD_BTN_DOWN)
+				sel = (sel + 1) % POSE_FIELD_COUNT;
+
+			// Held rather than pressed, so a value can be run up quickly;
+			// R1 multiplies the step by ten for the coarse fields.
+			int step = poseStep[sel] * ((buttons & PAD_BTN_R1) ? 10 : 1);
+
+			if (buttons & PAD_BTN_LEFT)
+				pose[which][sel] -= step;
+			if (buttons & PAD_BTN_RIGHT)
+				pose[which][sel] += step;
+
+			pose[which][sel] = clampi(pose[which][sel],
+				poseMin[sel], poseMax[sel]);
+		}
+
+		/*
+		 * What to draw: the selected pose while editing, or the interpolated
+		 * one while the preview runs. The preview uses the same cubic ease
+		 * and the same frame count the real sequence does, so it is not an
+		 * approximation of the animation - it is the animation.
+		 */
+		int shown[POSE_FIELD_COUNT];
+
+		if (play >= 0) {
+			int k    = ramp(play, 0, PS_LOGO_MOVE_FRAMES);
+			int inv  = 256 - k;
+			int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);
+
+			for (int i = 0; i < POSE_FIELD_COUNT; i++)
+				shown[i] = poseLerp(pose[0][i], pose[1][i], ease);
+
+			if (++play > PS_LOGO_MOVE_FRAMES + 30)
+				play = -1;
+		} else {
+			for (int i = 0; i < POSE_FIELD_COUNT; i++)
+				shown[i] = pose[which][i];
+		}
+
+		beginFrame(ctx);
+		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
+			0x000000, false);
+
+		xmbDrawIntroPSLogo(ctx,
+			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
+			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
+			DEG(shown[POSE_ROLL]), 256);
+
+		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
+		printString(ctx, 120, 8, 0x40c0ff,
+			(play >= 0) ? "PREVIEW" : (which ? "END" : "START"));
+
+		for (int i = 0; i < POSE_FIELD_COUNT; i++) {
+			char line[48];
+			int y = 24 + i * 10;
+
+			snprintf(line, sizeof(line), "%c %-22s %5d",
+				(i == sel) ? '>' : ' ', poseFieldNames[i], pose[which][i]);
+			printString(ctx, 8, y, (i == sel) ? 0xffffff : 0x909090, line);
+		}
+
+		printString(ctx, 8, 210, 0x707070,
+			CH_PS1_TRIANGLE_BUTTON " start/end   "
+			CH_PS1_SQUARE_BUTTON " preview   "
+			CH_PS1_CIRCLE_BUTTON " back");
+		printString(ctx, 8, 222, 0x707070,
+			"D-PAD pick/adjust   R1 x10");
+
+		endFrame(ctx);
+	}
+
+	while (pollController(0) | pollController(1))
+		;
+}
+
 /*
  * Variant picker.
  *
- * Deliberately plain: a dark screen, four lines, D-pad and X. It runs before
+ * Deliberately plain: a dark screen, a few lines, D-pad and X. It runs before
  * any of the boot artwork is uploaded, so it cannot depend on it.
+ *
+ * The last entry is not a variant - it opens the pose tool and comes back
+ * here, so it is handled inside the loop rather than returned.
  */
+#define INTRO_MENU_POSE_TOOL PS1_INTRO_COUNT
+#define INTRO_MENU_COUNT     (PS1_INTRO_COUNT + 1)
+
 int chooseIntroVariant(RenderContext *ctx) {
-	static const char *const names[PS1_INTRO_COUNT] = {
-		"1  Classic      flat gradient, as original",
-		"2  Glass        same logo, see-through",
-		"3  Spin         same logo, spun once",
+	static const char *const names[INTRO_MENU_COUNT] = {
+		"1  Classic        flat gradient, as original",
+		"2  Glass          same logo, see-through",
+		"3  Spin           same logo, spun once",
 		"4  White Ribbons  solid logo, white ribbons",
+		"5  Logo pose tool  edit the 3D start/end",
 	};
 
 	int sel = 0;
@@ -701,11 +875,17 @@ int chooseIntroVariant(RenderContext *ctx) {
 
 		if (sawRelease) {
 			if (pressed & PAD_BTN_UP)
-				sel = (sel + PS1_INTRO_COUNT - 1) % PS1_INTRO_COUNT;
+				sel = (sel + INTRO_MENU_COUNT - 1) % INTRO_MENU_COUNT;
 			if (pressed & PAD_BTN_DOWN)
-				sel = (sel + 1) % PS1_INTRO_COUNT;
-			if (pressed & (PAD_BTN_CROSS | PAD_BTN_START))
-				break;
+				sel = (sel + 1) % INTRO_MENU_COUNT;
+			if (pressed & (PAD_BTN_CROSS | PAD_BTN_START)) {
+				if (sel != INTRO_MENU_POSE_TOOL)
+					break;
+
+				tunePS1Logo(ctx);
+				sawRelease = false;
+				last = 0;
+			}
 		}
 
 		beginFrame(ctx);
@@ -716,7 +896,7 @@ int chooseIntroVariant(RenderContext *ctx) {
 		printString(ctx, 16, 40, 0x808080,
 			"D-PAD choose      " CH_PS1_CROSS_BUTTON " start");
 
-		for (int i = 0; i < PS1_INTRO_COUNT; i++) {
+		for (int i = 0; i < INTRO_MENU_COUNT; i++) {
 			printString(ctx, 24, 72 + i * 16,
 				(i == sel) ? 0x1256e3 : 0xa0a0a0, names[i]);
 		}

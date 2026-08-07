@@ -161,13 +161,21 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
  * (smaller is bigger), and bright is 0..256 scaling every face colour - which
  * is how the logo fades up out of black, since the faces are flat-shaded.
  *
- * `spin` is the swing-in angle about the vertical, in the 4096-per-circle
- * scale isin() uses. At 0 the model is already in the BIOS screen's resting
- * pose: that pose is baked into its vertices, so there is nothing else to get
- * right. The intro keeps its values in one block above drawPsScreen().
+ * yaw/pitch/roll are OFFSETS from the BIOS resting pose, which is baked into
+ * the model's vertices - all three at 0 is the finished orientation. They are
+ * in the 4096-per-circle scale isin() uses; intro_ps1.c's DEG() converts.
+ *
+ *   yaw    turntable, about the vertical Y axis
+ *   pitch  flip, about the horizontal X axis
+ *   roll   spin in the screen plane, about the depth Z axis
+ *
+ * Applied yaw innermost, then pitch, then roll. The intro's start and end
+ * poses live in one block above drawPsScreen(), and the pose tool on the boot
+ * menu edits exactly those six numbers live.
  */
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ, int spin, int bright
+	RenderContext *ctx, int cx, int cy, int camZ,
+	int yaw, int pitch, int roll, int bright
 );
 
 /*

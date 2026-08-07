@@ -2559,17 +2559,11 @@ typedef struct {
  * passed second so it lands innermost - see the note above on why the call
  * order looks backwards.
  */
-static void drawPSLogoModelPose(
+static void drawPSLogoFaces(
 	GPUDMAChain *chain,
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
-	int spinY, int tiltX, int bright
+	int bright
 ) {
-	gte_setRotationMatrix(GTE_UNIT, 0, 0,  0, GTE_UNIT, 0,  0, 0, GTE_UNIT);
-
-	cosmosRotate(0, spinY, 0);
-	if (tiltX)
-		cosmosRotate(0, 0, tiltX);
-
 	static PSLogoDrawFace drawFaces[
 		(PS_LOGO_FACE_COUNT > PS_LOGO_BIOS_FACE_COUNT)
 			? PS_LOGO_FACE_COUNT : PS_LOGO_BIOS_FACE_COUNT
@@ -2627,8 +2621,11 @@ static void drawPSLogoModelPose(
 static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 	int yaw = (int) t * 8 & 4095;
 
-	drawPSLogoModelPose(chain, psLogoVertices, psLogoFaces, PS_LOGO_FACE_COUNT,
-		yaw, roll, 256);
+	gte_setRotationMatrix(GTE_UNIT, 0, 0,  0, GTE_UNIT, 0,  0, 0, GTE_UNIT);
+	cosmosRotate(0, yaw, 0);
+	cosmosRotate(0, 0, roll);
+
+	drawPSLogoFaces(chain, psLogoVertices, psLogoFaces, PS_LOGO_FACE_COUNT, 256);
 	return yaw;
 }
 
@@ -2637,18 +2634,25 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
  * in ps_logo_bios.h, not the coarse ps_logo_model.h the themes use - posed
  * rather than free-spinning and positioned to match the BIOS screen.
  *
- * No tilt is passed, because the resting pose is baked into that model's
- * vertices (see its header). `spin` is the only angle, and it is the swing-in:
- * at 0 the logo is exactly in the BIOS orientation.
+ * The resting pose is baked into that model's vertices (see its header), so
+ * all three angles at 0 IS the BIOS orientation. They are offsets from it.
  *
  *   cx, cy   where the model's centre lands on screen, in pixels
  *   camZ     camera distance; smaller is bigger. The posed model is 326 units
  *            wide and setupCosmosGTE() sets H = min(w,h)/2, so 120 at
  *            320x240: camZ 430 gives roughly 110 pixels across.
+ *   yaw      turntable, about the vertical Y axis
+ *   pitch    flip, about the horizontal X axis
+ *   roll     spin in the screen plane, about the depth Z axis
  *   bright   0..256, scales the flat face colours (the fade)
+ *
+ * Angles are in the 4096-per-circle scale isin() uses, and are applied yaw
+ * innermost then pitch then roll - so yaw turns the logo on its own base, and
+ * roll then tips the whole result in the screen plane.
  */
 void xmbDrawIntroPSLogo(
-	RenderContext *ctx, int cx, int cy, int camZ, int spin, int bright
+	RenderContext *ctx, int cx, int cy, int camZ,
+	int yaw, int pitch, int roll, int bright
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -2665,9 +2669,19 @@ void xmbDrawIntroPSLogo(
 	gte_setControlReg(GTE_TRZ, camZ);
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
-	drawPSLogoModelPose(chain,
-		psLogoBiosVertices, psLogoBiosFaces, PS_LOGO_BIOS_FACE_COUNT,
-		spin & 4095, 0, bright);
+
+	// Three separate calls, outermost first: cosmosRotate() accumulates
+	// RT = first * second, so the LAST call is the one applied to the raw
+	// model. Roll, pitch, yaw therefore means yaw innermost.
+	gte_setRotationMatrix(GTE_UNIT, 0, 0,  0, GTE_UNIT, 0,  0, 0, GTE_UNIT);
+	if (roll)
+		cosmosRotate(roll & 4095, 0, 0);    /* slot 1 turns about Z */
+	if (pitch)
+		cosmosRotate(0, 0, pitch & 4095);   /* slot 3 turns about X */
+	cosmosRotate(0, yaw & 4095, 0);         /* slot 2 turns about Y */
+
+	drawPSLogoFaces(chain,
+		psLogoBiosVertices, psLogoBiosFaces, PS_LOGO_BIOS_FACE_COUNT, bright);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------
