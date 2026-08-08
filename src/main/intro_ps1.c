@@ -594,9 +594,7 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  * pose tool on the boot menu (entry 5) edits exactly these, live, and prints
  * them back in this form; read them off the screen and paste them here.
  *
- * Angles are degrees, offsets from the BIOS resting pose, which is baked into
- * the model (see ps_logo_bios.h). All three at 0 is the finished orientation,
- * which is why the END block is all zeroes.
+ * Angles are degrees, offsets from the BIOS resting pose baked into the model.
  *
  *   YAW    turntable, about the vertical Y axis
  *   PITCH  flip, about the horizontal X axis
@@ -614,26 +612,26 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  * 2 = newly supplied full-resolution BIOS GLB. The pose tool cycles all three
  * live for hardware comparison; this is just the value it starts from.
  */
-#define PS_LOGO_MODEL 1
+#define PS_LOGO_MODEL 2       /* finalized high-resolution C model */
 #define PS_LOGO_TUNE_MODEL 2  /* open the pose/effect tool directly on C */
 #define PS_LOGO_SHADE 0   /* finalized hardware-approved ALL MEDIUM bake */
-#define PS_LOGO_EFFECT 0
+#define PS_LOGO_EFFECT 28  /* R2 29/29: finalized COSMOS IMPACTS sequence */
 #define PS_LOGO_ANIM   0
 
 /* Dialled in on hardware with the pose tool - do not "tidy" these. */
 #define PS_LOGO_START_YAW    148      /* tumbling in, from far away       */
-#define PS_LOGO_START_PITCH  101
-#define PS_LOGO_START_ROLL    66
+#define PS_LOGO_START_PITCH  171
+#define PS_LOGO_START_ROLL   103
 #define PS_LOGO_START_CAM_Z 2320      /* distant, so it flies toward us   */
-#define PS_LOGO_START_X      160
-#define PS_LOGO_START_Y       80
+#define PS_LOGO_START_X      152
+#define PS_LOGO_START_Y        7
 
-#define PS_LOGO_END_YAW       29
-#define PS_LOGO_END_PITCH      1
+#define PS_LOGO_END_YAW       21
+#define PS_LOGO_END_PITCH      6
 #define PS_LOGO_END_ROLL       4
-#define PS_LOGO_END_CAM_Z    410
-#define PS_LOGO_END_X        158
-#define PS_LOGO_END_Y         81
+#define PS_LOGO_END_CAM_Z    680
+#define PS_LOGO_END_X        163
+#define PS_LOGO_END_Y         77
 
 /*
  * Frames the move takes, counted from T_PS_LOGO. Deliberately longer than the

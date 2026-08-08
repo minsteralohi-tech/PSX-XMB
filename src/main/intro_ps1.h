@@ -72,8 +72,9 @@ typedef enum {
 	PS1_INTRO_COUNT
 } PS1IntroVariant;
 
-/* Set to 0 once a direction is settled on. */
-#define PS1_BOOT_SHOW_MENU 1
+/* Finalized: boot directly into Classic orange SCE -> C Cosmos Impacts.
+ * The pose/effect editor remains available under Hardware Tester. */
+#define PS1_BOOT_SHOW_MENU 0
 
 /* Show the variant picker and return the chosen one. */
 int chooseIntroVariant(RenderContext *ctx);
