@@ -12,7 +12,7 @@
  * only ever mixes toward what is already there, so darkening is easy and
  * brightening is not. Starting on white sidesteps it entirely.
  *
- * TIMELINE (60Hz frames; ~15.65s total)
+ * TIMELINE (60Hz frames; ~15.47s total)
  *
  *      0   white screen, SCE diamond fades in over 6f
  *      9   two triangles converge for 51f, shrinking 25%x50% -> 10%x20%
@@ -22,8 +22,10 @@
  *    375   PS logo fades in over 27f
  *    402   credits fade in
  *    405   PlayStation wordmark fades in over 24f
- *    870   everything fades out over 9f
- *    939   ends, menu takes over
+ *    870   wordmark/licensing/Cosmos fade, final PS logo remains
+ *    879   current menu theme fades in behind the held PS logo
+ *    909   PS logo fades out over the live menu theme
+ *    928   menu categories/items take over
  *
  * TWO KINDS OF FADE, FOR A REASON
  *
@@ -204,7 +206,11 @@ static void rotatePoint(int cx, int cy, int *x, int *y) {
 #define T_PS_TEXT_END  429
 #define T_ALL_OUT      870
 #define T_ALL_OUT_END  879
-#define T_END          939
+#define T_MENU_BG_IN   T_ALL_OUT_END
+#define T_MENU_BG_END  909
+#define T_LOGO_OUT     T_MENU_BG_END
+#define T_LOGO_OUT_END 927
+#define T_END          928
 
 /*
  * The CSS lays the whole animation out inside a square (100vmin), so on a
@@ -654,9 +660,15 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 	if (frame >= T_ALL_OUT) {
 		int out = 256 - ramp(frame, T_ALL_OUT, T_ALL_OUT_END);
 
-		logoLevel    = (logoLevel    * out) >> 8;
 		textLevel    = (textLevel    * out) >> 8;
 		creditsLevel = (creditsLevel * out) >> 8;
+	}
+	/* During the handoff every PS-screen element except the 3D logo has
+	 * already gone. Hold C over the incoming live menu theme, then fade only
+	 * the logo so the category ribbon can appear on the following frame. */
+	if (frame >= T_LOGO_OUT) {
+		int out = 256 - ramp(frame, T_LOGO_OUT, T_LOGO_OUT_END);
+		logoLevel = (logoLevel * out) >> 8;
 	}
 
 	if (logoLevel > 0) {
@@ -676,6 +688,20 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		int k    = ramp(frame, T_PS_LOGO, T_PS_LOGO + PS_LOGO_MOVE_FRAMES);
 		int inv  = 256 - k;
 		int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);   /* 0 -> 256 */
+		int logoEffect = PS_LOGO_EFFECT;
+		int backdropDarkness = 0;
+
+		if (frame >= T_MENU_BG_IN) {
+			/* The selected menu theme is already underneath us; reveal it
+			 * while suppressing the old Cosmos backdrop completely. */
+			logoEffect = 0;
+			backdropDarkness = 256
+				- ramp(frame, T_MENU_BG_IN, T_MENU_BG_END);
+		} else if (frame >= T_ALL_OUT) {
+			/* First take the Black PS screen cleanly down to black while C
+			 * stays bright and stationary. */
+			backdropDarkness = ramp(frame, T_ALL_OUT, T_ALL_OUT_END);
+		}
 
 		xmbDrawIntroPSLogo(ctx, PS_LOGO_MODEL,
 			poseLerp(PS_LOGO_START_X,     PS_LOGO_END_X,     ease),
@@ -685,10 +711,11 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 			DEG(poseLerp(PS_LOGO_START_PITCH, PS_LOGO_END_PITCH, ease)),
 			DEG(poseLerp(PS_LOGO_START_ROLL,  PS_LOGO_END_ROLL,  ease)),
 			clampi(logoLevel, 0, 256), PS_LOGO_SHADE,
-			PS_LOGO_EFFECT, PS_LOGO_ANIM, (uint32_t) frame,
+			logoEffect, PS_LOGO_ANIM, (uint32_t) frame,
 			(frame >= T_PS_LOGO + PS_LOGO_MOVE_FRAMES)
 				? (uint32_t) (frame - (T_PS_LOGO + PS_LOGO_MOVE_FRAMES))
-				: 0);
+				: 0,
+			backdropDarkness);
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates
@@ -877,7 +904,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
 			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
 			DEG(shown[POSE_ROLL]), 256, shade,
-			effect, anim, fxFrame++, settledFrames);
+			effect, anim, fxFrame++, settledFrames, 0);
 
 		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
 		printString(ctx, 104, 8, 0x40c0ff,
@@ -1065,6 +1092,13 @@ void runPS1Boot(RenderContext *ctx) {
 			if (out > 0)
 				drawSceScreen(ctx, frame);
 		} else {
+			/* The final handoff renders the CURRENT menu theme without any
+			 * XMB UI. drawPsScreen() applies the generic fade above it and
+			 * redraws the held logo last. Because this follows xmbThemeIndex,
+			 * future persisted theme settings automatically use the same
+			 * transition with no theme-specific intro code. */
+			if (frame >= T_MENU_BG_IN)
+				drawXMBBackground(ctx);
 			drawPsScreen(ctx, frame);
 		}
 

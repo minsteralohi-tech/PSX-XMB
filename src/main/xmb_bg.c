@@ -3673,10 +3673,50 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 	setBlend(chain, GP0_BLEND_SEMITRANS);
 }
 
+/* Generic 0..256 fade-to-black placed BETWEEN a background and the held PS
+ * logo. It works with every current/future menu theme without teaching each
+ * theme about intro opacity. Full-screen 50% black passes establish a coarse
+ * brightness interval; one ordered 64-band pass fills the fraction between
+ * intervals, avoiding the obvious four-step fade a PS1 blend alone gives. */
+static PS_LOGO_SIZE_ATTR void drawIntroBackdropFade(
+	RenderContext *ctx, GPUDMAChain *chain, int darkness
+) {
+	if (darkness <= 0)
+		return;
+	if (darkness >= 256) {
+		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
+			gp0_rgb(0, 0, 0), false);
+		return;
+	}
+
+	setBlend(chain, GP0_BLEND_SEMITRANS);
+	int wanted = 256 - darkness;
+	int hi = 256;
+	while (wanted < (hi >> 1)) {
+		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
+			gp0_rgb(0, 0, 0), true);
+		hi >>= 1;
+	}
+
+	int lo = hi >> 1;
+	int bands = ((hi - wanted) * 64 + (hi - lo) - 1) / (hi - lo);
+	int bandH = (ctx->screenHeight + 63) / 64;
+	for (int band = 0; band < 64; band++) {
+		/* 37 is coprime to 64, distributing successive bands over the full
+		 * screen instead of revealing them as one descending black block. */
+		if (((band * 37) & 63) >= bands)
+			continue;
+		drawRect(ctx, 0, band * bandH, ctx->screenWidth, bandH,
+			gp0_rgb(0, 0, 0), true);
+	}
+	setBlend(chain, GP0_BLEND_SEMITRANS);
+}
+
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,
-	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame
+	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame,
+	int backdropDarkness
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -3692,6 +3732,8 @@ void xmbDrawIntroPSLogo(
 	if (model == 2)
 		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy,
 			fxFrame, settledFrame);
+
+	drawIntroBackdropFade(ctx, chain, backdropDarkness);
 
 	/* 29/29 owns one complete Edge Chase after its one-shot barrage. It
 	 * starts 0.3 seconds after the final firework ends and supplies a local

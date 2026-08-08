@@ -192,7 +192,8 @@ const char *xmbIntroPSLogoAnimName(int model, int anim);
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,
-	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame
+	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame,
+	int backdropDarkness
 );
 
 /*

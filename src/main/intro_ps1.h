@@ -72,9 +72,9 @@ typedef enum {
 	PS1_INTRO_COUNT
 } PS1IntroVariant;
 
-/* Finalized: boot directly into Classic orange SCE -> C Cosmos Impacts.
- * The pose/effect editor remains available under Hardware Tester. */
-#define PS1_BOOT_SHOW_MENU 0
+/* Keep the four SCE styles selectable while the intro is still being tuned.
+ * The pose/effect editor is also available permanently under Hardware Tester. */
+#define PS1_BOOT_SHOW_MENU 1
 
 /* Show the variant picker and return the chosen one. */
 int chooseIntroVariant(RenderContext *ctx);
@@ -90,7 +90,7 @@ void initPS1Boot(RenderContext *ctx);
 void runPSLogoPoseTool(RenderContext *ctx);
 
 /*
- * Play the sequence, about 15.65 seconds. Returns when it finishes or the
+ * Play the sequence, about 15.47 seconds. Returns when it finishes or the
  * user presses anything.
  */
 void runPS1Boot(RenderContext *ctx);
