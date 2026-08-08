@@ -63,7 +63,6 @@ addPS1Executable(
 	src/common/sio0.c
 	src/common/spu.c
 	src/main/cd_player.c
-	src/main/cpu_bench.c
 	src/main/console_info.c
 	src/main/memcard.c
 	src/main/crt0.s
@@ -97,6 +96,7 @@ addPS1Executable(
 	src/main/intro_ps1.c
 	src/main/app_stub.s
 	src/main/settings_save.c
+	src/main/shared_scratch.c
 	src/main/unirom_launch.c
 	src/main/handoff.c
 )
@@ -106,10 +106,15 @@ target_compile_options(
 	-Wextra
 )
 # The dashboard is intentionally packed against the stock PS1's 2 MB RAM
-# ceiling. Settings save/load is an infrequent UI path, so favour code size
-# over the target-wide -O3 setting for this source without slowing animation.
+# ceiling. These are infrequent, non-animation UI paths, so favour code size
+# over the target-wide -O3 setting without slowing the intro, live themes or
+# other frame-critical renderers.
 set_source_files_properties(
-	src/main/settings_save.c PROPERTIES COMPILE_OPTIONS "-Os"
+	src/main/settings_save.c
+	src/main/console_info.c
+	src/main/launch_ui.c
+	src/main/badge.c
+	PROPERTIES COMPILE_OPTIONS "-Os"
 )
 target_compile_definitions(
 	"${RELEASE_NAME}" PRIVATE

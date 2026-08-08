@@ -112,6 +112,17 @@ SECTIONS {
 		_bssEnd = .;
 	} > APP_RAM
 
+	/*
+	 * test.c borrows 8 KB immediately after _bssEnd for its two 4 KB DMA
+	 * buffers.  Keep that upstream-style scratch area out of .bss so the main
+	 * RAM test may still exercise it, but fail the build instead of silently
+	 * wrapping into kernel RAM if future dashboard features consume the space.
+	 */
+	ASSERT(
+		_bssEnd + 0x2000 <= ORIGIN(APP_RAM) + LENGTH(APP_RAM),
+		"PS1 RAM tester needs 8 KB of scratch RAM after _bssEnd"
+	)
+
 	/* Dummy sections */
 
 	.dummy (NOLOAD) : {

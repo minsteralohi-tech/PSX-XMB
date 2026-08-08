@@ -10,14 +10,11 @@ No dependencies beyond the standard library: GLB is a JSON chunk followed by a
 binary chunk, and the only accessors needed here are float POSITION and
 uint16/uint32 indices.
 
-THREE SELECTABLE MODELS:
-
-  A  ps_logo_bios.h   a shallow relief - the flat artwork extruded a little,
-                      everything in one slab
-  B  ps_logo_bios2.h  built the way the real BIOS logo is: the P standing
-                      upright on a swoosh lying flat on the ground plane
-  C  ps_logo_bios3.h  the newly supplied full-resolution BIOS GLB, kept as a
-                      separate pose-tool option so it can be tuned independently
+The retired relief and system-BIOS comparison models are no longer emitted.
+This script retains only ps_logo_bios3.h, the finalized intro model. The new
+textured Meshy pose model has a separate Blender-assisted conversion pipeline
+in tools/blender_prepare_meshy_logo.py because its source is a 60k-triangle,
+UV-textured mesh rather than a small flat-colour GLB.
 
 The intro picks among them with PS_LOGO_MODEL in intro_ps1.c, and the pose
 tool on the boot menu switches live with L1.
@@ -215,6 +212,11 @@ MODELS = [
         "target_extent": 1320.0,
     },
 ]
+
+# The first two specifications document the retired A/B conversion settings,
+# but their source assets and generated headers are intentionally gone. Only
+# regenerate the finalized former-C model from this standard-library pipeline.
+MODELS = MODELS[2:]
 
 # Default posed extent used by A/B. A model can override this; C requests 660
 # so its whole object is exactly 2x the old 330-unit pose-tool size.

@@ -36,7 +36,7 @@ register definitions (`src/ps1/`), and the font/renderer/UI/modal framework
 carried over with minimal or no changes.
 
 New for this project: the main menu (`src/main/mainmenu.c`), the three test
-screens (`gpu_colorbars.c`, `cpu_bench.c`, `spu_channel_test.c`), and the
+screens (`gpu_colorbars.c`, `spu_channel_test.c`), and the
 sound module (`sound.c`) that drives the UI sounds and looping BGM.
 
 Everything in this repository is licensed under the MIT license (or the
