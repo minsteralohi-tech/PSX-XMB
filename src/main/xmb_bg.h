@@ -71,6 +71,8 @@ extern uint8_t           xmbThemeIndex; // 0 .. XMB_THEME_COUNT - 1
  * reordered.
  */
 #define XMB_THEME_GOURAUD_SPARKLE 1
+#define XMB_THEME_COSMOS_3D_PP    5
+#define XMB_THEME_NEBULA3         9
 
 /*
  * Colour palettes for the PSP-derived wave themes. Selecting one recolours
@@ -144,6 +146,15 @@ void drawFlatBackdrop(RenderContext *ctx, uint32_t color);
 void drawXMBBackground(RenderContext *ctx);
 
 /*
+ * Boot-to-XMB handoff helpers. The first fades the selected theme's own exact
+ * base gradient up from black. The second grows and brightens that same
+ * theme's animated elements from a distant vanishing point into their exact
+ * normal positions (progress is 0..256). Neither function draws menu UI.
+ */
+void drawXMBBackgroundBaseFade(RenderContext *ctx, int progress);
+void drawXMBBackgroundReveal(RenderContext *ctx, int progress);
+
+/*
  * The boot intro's SCE field: the Parallax Ribbons theme's four ribbons and
  * the PS5 Sparkle theme's rising particles, both drawn additively over `field`
  * so everything on screen is a whiter shade of it. Pass the intro's SCE_FIELD.
@@ -160,6 +171,8 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
  * cx/cy is where the model's centre lands, camZ is the camera distance
  * (smaller is bigger), and bright is 0..256 scaling every face colour - which
  * is how the logo fades up out of black, since the faces are flat-shaded.
+ * backdropLevel is 0..256 and is used by the finalized Cosmos effect during
+ * the menu handoff; the pose tool and ordinary intro rendering pass 256.
  *
  * yaw/pitch/roll are OFFSETS from the BIOS resting pose, which is baked into
  * the model's vertices - all three at 0 is the finished orientation. They are
@@ -193,7 +206,7 @@ void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,
 	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame,
-	int backdropDarkness
+	int backdropLevel
 );
 
 /*

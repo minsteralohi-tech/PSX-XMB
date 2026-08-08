@@ -28,6 +28,7 @@
 #include "main/intro_ps1.h"
 #include "main/mainmenu.h"
 #include "main/renderer.h"
+#include "main/settings_save.h"
 #include "main/sound.h"
 #include "main/ui.h"
 #include "main/xmb_bg.h"
@@ -88,6 +89,9 @@ int main(int argc, const char **argv) {
 	initNebulaTexture(&ctx);
 	initXMB();
 	initSystemHUD();
+	/* Apply the first valid dashboard save before the intro hands off to the
+	 * selected live theme.  No save/card is a normal silent first-boot case. */
+	loadSettingsAtBoot();
 
 #if PS1_BOOT_ENABLED
 	// The PlayStation boot sequence, once per launch. Its textures are
@@ -104,6 +108,13 @@ int main(int argc, const char **argv) {
 #endif
 
 	enterMainMenu(&ctx, &state, 0);
+
+#if PS1_BOOT_ENABLED
+	/* The intro leaves the selected live theme on screen. Slide the actual
+	 * menu renderer over that same background for the fourth 0.5 s stage, so
+	 * the following normal menu frame is pixel-identical at the handoff. */
+	beginXMBIntroReveal();
+#endif
 
 #if GAMEID_ENABLED
 	// Buffer for SYSTEM.CNF. Static rather than a local: 2 KB is far more
@@ -165,19 +176,20 @@ int main(int argc, const char **argv) {
 				char toggleLine[64];
 				snprintf(
 					toggleLine, sizeof(toggleLine),
-					"L2: Music %s   R2: Background scroll %s",
+					CH_PS1_L2_BUTTON ": Music %s   "
+					CH_PS1_R2_BUTTON ": Background scroll %s",
 					isBGMEnabled() ? "ON" : "OFF",
 					isBackgroundScrollEnabled() ? "ON" : "OFF"
 				);
-				printString(&ctx, 16, 196, 0x505050, toggleLine);
+				printString(&ctx, 16, 192, 0x505050, toggleLine);
 
 				char toggleLine2[48];
 				snprintf(
 					toggleLine2, sizeof(toggleLine2),
-					"SELECT: System HUD %s",
+					CH_PS1_SELECT_BUTTON ": System HUD %s",
 					isSystemHUDEnabled() ? "ON" : "OFF"
 				);
-				printString(&ctx, 16, 206, 0x505050, toggleLine2);
+				printString(&ctx, 16, 207, 0x505050, toggleLine2);
 			}
 		}
 

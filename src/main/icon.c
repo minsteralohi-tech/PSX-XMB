@@ -20,7 +20,7 @@ extern const uint8_t padGlyphTexture[], padGlyphPalette[];
 #define CAT_SHEET_W   256
 #define CAT_SHEET_H   128   // 4 x 2 cells = 6 category icons (2 spare)
 #define ITEM_SHEET_W  256
-#define ITEM_SHEET_H  192   // 4 x 3 cells = 11 item icons (1 spare)
+#define ITEM_SHEET_H  192   // 4 x 3 cells; item 11 is the settings-save icon
 
 /*
  * Why two sheets instead of one:
@@ -63,10 +63,11 @@ extern const uint8_t padGlyphTexture[], padGlyphPalette[];
  * textures overwrote them on every theme load, which showed up as the glyphs
  * rendering as coloured noise while still being the right shape and size.
  *
- * 960..996 (144px at 4bpp = 36 columns) is genuinely free, and 960 is an
- * exact multiple of 64 as the texpage base requires.
+ * The 19x19 dashboard navigation D-pad extends the sheet to 168px, so it now
+ * occupies x=960..1002 (42 VRAM halfword columns). This is still clear of the
+ * framebuffer and 960 remains the required 64-column-aligned texpage base.
  */
-#define PAD_GLYPH_SHEET_W 144
+#define PAD_GLYPH_SHEET_W 168
 #define PAD_GLYPH_SHEET_H  64
 #define PAD_GLYPH_VRAM_X  960
 #define PAD_GLYPH_VRAM_Y    0
@@ -105,30 +106,61 @@ void initIcons(RenderContext *ctx) {
  * shows exactly as drawn - the pressed state is a different cell, not a
  * colour change, which is why this needs no highlight box behind it.
  */
-void drawPadGlyph(RenderContext *ctx, int index, int x, int y) {
+void drawPadGlyphSized(
+	RenderContext *ctx, int index, int x, int y, int width, int height,
+	uint32_t color
+) {
 	if (index < 0 || index >= PAD_GLYPH_CELLS)
 		return;
 
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
-	int cx = (index % PAD_GLYPH_COLS) * PAD_GLYPH_W;
-	int cy = (index / PAD_GLYPH_COLS) * PAD_GLYPH_H;
+	int cx, cy, sourceWidth, sourceHeight;
+	if (index == PAD_GLYPH_NAVIGATE) {
+		/* The supplied navigation art is 19x19 rather than an 18x16 tester
+		 * cell, so it lives in the atlas extension at x=144. */
+		cx = 144;
+		cy = 0;
+		sourceWidth = 19;
+		sourceHeight = 19;
+	} else {
+		cx = (index % PAD_GLYPH_COLS) * PAD_GLYPH_W;
+		cy = (index / PAD_GLYPH_COLS) * PAD_GLYPH_H;
+		sourceWidth = PAD_GLYPH_W;
+		sourceHeight = PAD_GLYPH_H;
+	}
+
 	int u0 = padGlyphTex.u + cx,        v0 = padGlyphTex.v + cy;
-	int u1 = u0 + PAD_GLYPH_W - 1,      v1 = v0 + PAD_GLYPH_H - 1;
+	/*
+	 * A stretched PS1 textured quad samples up to (but not including) its
+	 * far UV edge.  The tester glyphs were authored around that old -1
+	 * convention, but the supplied 19x19 navigation art uses every source
+	 * pixel.  Give that one cell its true right/bottom boundary so the final
+	 * black outline texel is not discarded.
+	 */
+	int sourceInset = (index == PAD_GLYPH_NAVIGATE) ? 0 : 1;
+	int u1 = u0 + sourceWidth - sourceInset;
+	int v1 = v0 + sourceHeight - sourceInset;
 
 	uint32_t *page = allocateGP0Packet(chain, 1);
 	page[0] = gp0_setPage(padGlyphTex.page, false, false);
 
 	uint32_t *ptr = allocateGP0Packet(chain, 9);
-	ptr[0] = 0x808080u | gp0_shadedQuad(false, true, false);
+	ptr[0] = color | gp0_shadedQuad(false, true, false);
 	ptr[1] = gp0_xy(x, y);
 	ptr[2] = gp0_uv(u0, v0, padGlyphTex.clut);
-	ptr[3] = gp0_xy(x + PAD_GLYPH_W, y);
+	ptr[3] = gp0_xy(x + width, y);
 	ptr[4] = gp0_uv(u1, v0, padGlyphTex.page);
-	ptr[5] = gp0_xy(x, y + PAD_GLYPH_H);
+	ptr[5] = gp0_xy(x, y + height);
 	ptr[6] = gp0_uv(u0, v1, 0);
-	ptr[7] = gp0_xy(x + PAD_GLYPH_W, y + PAD_GLYPH_H);
+	ptr[7] = gp0_xy(x + width, y + height);
 	ptr[8] = gp0_uv(u1, v1, 0);
+}
+
+void drawPadGlyph(RenderContext *ctx, int index, int x, int y) {
+	int width  = (index == PAD_GLYPH_NAVIGATE) ? 19 : PAD_GLYPH_W;
+	int height = (index == PAD_GLYPH_NAVIGATE) ? 19 : PAD_GLYPH_H;
+	drawPadGlyphSized(ctx, index, x, y, width, height, 0x808080u);
 }
 
 /*

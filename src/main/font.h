@@ -56,11 +56,7 @@ int getStringWidth(const char *str);
 // Width of str if drawn with printStringScaled() at scalePercent%.
 int getStringWidthScaled(const char *str, int scalePercent);
 
-/*
- * D-pad direction glyph (see printDpadDirection() in font.c). One piece of
- * art, drawn rotated per direction - there is no separate sprite for
- * Right/Down/Left.
- */
+/* Pad tester direction glyph selected by printDpadDirection(). */
 typedef enum {
 	DPAD_DIR_UP = 0,
 	DPAD_DIR_RIGHT,
@@ -69,14 +65,11 @@ typedef enum {
 } DpadDirection;
 
 /*
- * Draw the D-pad direction glyph at (x, y) in the given rotation. Unlike
- * printString, this always shows the glyph's own baked colour - there is no
- * colour argument, matching how every other button glyph in this font
- * ignores the string's colour.
+ * Draw the corresponding pad tester direction glyph at (x, y) in its baked
+ * neutral colour.
  *
- * "\x89" typed directly into a printString() string always renders as Up
- * only (see the note on the 0x89 sprite table entry in font.c); call this
- * function directly for the other three directions.
+ * "\x89" typed directly into a printString() string renders Up; call this
+ * function directly for Right/Down/Left.
  */
 void printDpadDirection(
 	RenderContext *ctx, int x, int y, DpadDirection direction

@@ -9,7 +9,6 @@
 #include "common/sio0.h"
 #include "main/badge.h"
 #include "main/launch_ui.h"
-#include "main/music_settings.h"
 #include "main/cd_player.h"
 #include "main/console_info.h"
 #include "main/cpu_bench.h"
@@ -28,6 +27,7 @@
 #include "main/pad_test.h"
 #include "main/ramtester.h"
 #include "main/renderer.h"
+#include "main/settings_save.h"
 #include "main/sound.h"
 #include "main/spu_channel_test.h"
 #include "main/ui.h"
@@ -61,24 +61,37 @@ static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item);
+static void xmbIntroStyleTest(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbPSLogoPoseTool(RenderContext *ctx, UIState *state, const MenuItem *item);
+
+/* Music is rendered and handled by the in-place XMB flyout below, so its
+ * table entry only needs a harmless callback to satisfy ITEM_ACTION's data
+ * contract.  The former standalone music_settings.c screen was unreachable
+ * and needlessly occupied scarce application RAM. */
+static void xmbMusicFlyoutMarker(
+	RenderContext *ctx, UIState *state, const MenuItem *item
+) {
+	(void) ctx;
+	(void) state;
+	(void) item;
+}
 
 /* Icon indices refer to the 12-slot textured item sheet (assets/icons.png).
  * The CATEGORY icons are not in this sheet - they're drawn as vector
  * sheet (assets/icons_cat.png) - see icon.c for the layout. */
 static const XMBEntry settingsItems[] = {
 	{ "Console Information", 0, runConsoleInfo,     true  },
-	{ "Trophy",              11, runTrophyRoom,      true  },
+	{ "Trophy",              0,  runTrophyRoom,      true  },
 	{ "SIO Loader",          0,  runSIOLoader,       true  },
-	{ "Music",               0,  runMusicSettings,   true  },
+	{ "Music",               0,  xmbMusicFlyoutMarker, true },
+	{ "Save Settings",       11, runSettingsSave,    true  },
 	{ "Reboot",              1, doFullReboot,       false },
 	{ "About",               2, enterAboutMenu,     false },
 };
 // Index of "Music" within settingsItems[] above - selecting it opens the
 // BGM/SFX flyout (see musicMenuOpen) instead of dispatching its own
-// .action callback (runMusicSettings is kept only as a documented no-op
-// fallback - see its own header comment - since ITEM_ACTION dispatch
-// requires every entry to have a non-null callback).
+// .action callback. ITEM_ACTION still requires a non-null table callback,
+// so xmbMusicFlyoutMarker is the deliberately tiny fallback.
 #define MUSIC_ITEM_INDEX 3
 
 // True if `cat`/`itemIndex` is exactly the "Music" row within Settings -
@@ -96,6 +109,7 @@ static const XMBEntry hwItems[] = {
 	{ "GPU Color Bar",      5, runColorBarTest,    true },
 	{ "GPU Spinning Cube",  6, runGPUCubeTest,     true },
 	{ "Test PlayStation Model", 5, runModelTest,   true },
+	{ "Intro Style Test",   5, xmbIntroStyleTest,  true },
 	{ "PS Logo Pose Tool",  5, xmbPSLogoPoseTool,  true },
 	{ "CPU Benchmark",      7, runCPUBenchmark,    true },
 	{ "SPU Channel Test",   8, runSPUChannelTest,  true },
@@ -138,6 +152,7 @@ static int  catIndex  = 0;
 static int  itemIndex = 0;
 static int  catPosFx  = 0;   // fixed point (*256) for smooth gliding
 static int  itemPosFx = 0;
+static int  introSlideFrame = -1;
 
 /*
  * Palette submenu. The PSP wave theme supports recolouring, so selecting it
@@ -176,6 +191,7 @@ static int  musicSlideFx     = 0;       // 0..256 slide-in of the right column
 
 void initXMB(void) {
 	active = false; catIndex = 0; itemIndex = 0; catPosFx = 0; itemPosFx = 0;
+	introSlideFrame = -1;
 	themeMenuOpen = false; themeOptIndex = 0;
 	subMenuOpen = false; subIndex = 0; subPosFx = 0; slideFx = 0;
 	musicMenuOpen = false; musicOptIndex = 0;
@@ -183,6 +199,7 @@ void initXMB(void) {
 }
 bool isXMBActive(void) { return active; }
 void setXMBActive(bool a) { active = a; }
+void beginXMBIntroReveal(void) { introSlideFrame = 0; }
 
 /* --- local actions ------------------------------------------------------ */
 
@@ -218,10 +235,20 @@ static void xmbPSLogoPoseTool(RenderContext *ctx, UIState *state, const MenuItem
 	runPSLogoPoseTool(ctx);
 }
 
+static void xmbIntroStyleTest(RenderContext *ctx, UIState *state, const MenuItem *item) {
+	(void) state;
+	(void) item;
+	runPS1IntroStyleTest(ctx);
+	/* Match a real boot: after the background/logo handoff rendered by the
+	 * preview, slide the complete XMB grid into its final position. */
+	beginXMBIntroReveal();
+}
+
 
 /* --- drawing helpers ---------------------------------------------------- */
 
 #define TEXT_WHITE  0x808080
+#define TEXT_SELECTED 0xffffff
 #define TEXT_DIM    0x404040
 // Listed but not present in this build - see bgmTrackAvailable().
 #define TEXT_DISABLED 0x202020
@@ -246,7 +273,7 @@ static void drawDisc(GPUDMAChain *chain, int cx, int cy, uint32_t color) {
 /* --- theme customization options ---------------------------------------- */
 
 // Music used to be a 4th option here; it's now its own entry under Settings
-// (see runMusicSettings() / settingsItems below) since BGM selection isn't
+// (see settingsItems[] above) since BGM selection isn't
 // really specific to this one theme's customization, and more tracks are
 // coming later.
 enum { OPT_ICONS = 0, OPT_COLOR, OPT_WAVE, THEME_OPT_COUNT };
@@ -310,10 +337,42 @@ static int textLeftFor(const char *s, int centreX) {
 	return centreX - (n * 6) / 2;
 }
 
+/* Shift every menu primitive at once with the GPU drawing origin. The theme
+ * has already been emitted with the normal origin, so it stays perfectly
+ * still underneath the incoming header, category row, items and footer. */
+static int beginIntroMenuLayer(RenderContext *ctx) {
+	if (introSlideFrame < 0)
+		return 0;
+
+	int k = (introSlideFrame >= 29)
+		? 256 : (introSlideFrame * 256) / 29;
+	int ease = (k * k * (768 - 2 * k)) >> 16; /* smoothstep */
+	int offset = (ctx->screenWidth * (256 - ease)) >> 8;
+
+	if (introSlideFrame < 30)
+		introSlideFrame++;
+
+	if (offset) {
+		int bufferX = (ctx->frameCounter & 1) ? ctx->screenWidth : 0;
+		uint32_t *ptr = allocateGP0Packet(getCurrentChain(ctx), 1);
+		ptr[0] = gp0_fbOrigin(bufferX + offset, 0);
+	}
+	return offset;
+}
+
+static void endIntroMenuLayer(RenderContext *ctx, int offset) {
+	if (!offset)
+		return;
+	int bufferX = (ctx->frameCounter & 1) ? ctx->screenWidth : 0;
+	uint32_t *ptr = allocateGP0Packet(getCurrentChain(ctx), 1);
+	ptr[0] = gp0_fbOrigin(bufferX, 0);
+}
+
 void renderXMB(RenderContext *ctx, UIState *state) {
 	(void) state;
 
 	drawXMBBackground(ctx);
+	int introOffset = beginIntroMenuLayer(ctx);
 
 	// Glide toward targets. The category ribbon and the theme item list use
 	// catPosFx / itemPosFx; the theme customization value column has its own
@@ -446,7 +505,7 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 			int y = ITEM_TOP + j * ITEM_GAP;
 			bool sel = (j == themeOptIndex);
 			printString(ctx, OPT_X, y - 4,
-				sel ? TEXT_WHITE : TEXT_DIM, themeOptNames[j]);
+				sel ? TEXT_SELECTED : TEXT_DIM, themeOptNames[j]);
 			// A ">" cue on the focused option points to the value column.
 			if (sel)
 				printString(ctx, OPT_X - 10, y - 4, TEXT_WHITE, ">");
@@ -474,7 +533,7 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 				bool sel = subMenuOpen && ady < 128;
 
 				printString(ctx, x + 14, y - 4,
-					sel ? TEXT_WHITE : TEXT_DIM,
+					sel ? TEXT_SELECTED : TEXT_DIM,
 					themeOptValueName(themeOptIndex, j));
 				// Circle marks the value that's currently applied.
 				if (j == applied)
@@ -483,9 +542,10 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		}
 
 		printString(ctx, 12, 214, TEXT_DIM,
-			CH_PS1_DPAD_Y " Move   "
+			CH_PS1_DPAD " Navigate   "
 			CH_PS1_CROSS_BUTTON " Select   "
 			CH_PS1_CIRCLE_BUTTON " Back");
+		endIntroMenuLayer(ctx, introOffset);
 		return;
 	}
 
@@ -502,7 +562,7 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 			int y = ITEM_TOP + j * ITEM_GAP;
 			bool sel = (j == musicOptIndex);
 			printString(ctx, MUSIC_OPT_X, y - 4,
-				sel ? TEXT_WHITE : TEXT_DIM, musicOptNames[j]);
+				sel ? TEXT_SELECTED : TEXT_DIM, musicOptNames[j]);
 			if (sel)
 				printString(ctx, MUSIC_OPT_X - 10, y - 4, TEXT_WHITE, ">");
 		}
@@ -531,7 +591,7 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 				// unavailable rather than broken. See bgmTrackAvailable().
 				bool avail = !isBGM || bgmTrackAvailable(j);
 				uint32_t col = !avail ? TEXT_DISABLED
-				             : (sel ? TEXT_WHITE : TEXT_DIM);
+				             : (sel ? TEXT_SELECTED : TEXT_DIM);
 
 				printString(ctx, x + 14, y - 4, col,
 					isBGM ? getBGMName(j) : getSFXSetName(j));
@@ -541,9 +601,10 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		}
 
 		printString(ctx, 12, 214, TEXT_DIM,
-			CH_PS1_DPAD_Y " Move   "
+			CH_PS1_DPAD " Navigate   "
 			CH_PS1_CROSS_BUTTON " Select   "
 			CH_PS1_CIRCLE_BUTTON " Back");
+		endIntroMenuLayer(ctx, introOffset);
 		return;
 	}
 
@@ -556,12 +617,13 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 		int ady = dyFx < 0 ? -dyFx : dyFx;
 		bool sel = ady < 128;
 
-		// The selected row is distinguished purely by being bigger,
-		// brighter and fully opaque - no highlight bar, no drop shadow.
+		/* Match CD player's "REVERB: OFF" labels exactly: every selected
+		 * string is one complete printString() pass at 0xffffff. Keeping this
+		 * single-pass avoids detached or partially duplicated glyph shadows. */
 		if (cat->isThemes) {
 			// Theme rows are text-only, with a marker on the active theme.
 			const char *nm = xmbThemeNames[j];
-			printString(ctx, ITEM_X, y - 4, sel ? TEXT_WHITE : TEXT_DIM, nm);
+			printString(ctx, ITEM_X, y - 4, sel ? TEXT_SELECTED : TEXT_DIM, nm);
 			// Circle marks the currently active theme (was a tiny ".").
 			if (j == xmbThemeIndex)
 				drawDisc(getCurrentChain(ctx), ITEM_X - 7, y - 1, TEXT_WHITE);
@@ -569,25 +631,34 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 			int isz = sel ? 18 : 14;
 			drawIcon(ctx, cat->items[j].icon, ITEM_X - isz / 2, y - isz / 2, isz, !sel);
 			printString(ctx, ITEM_X + 14, y - 4,
-				sel ? TEXT_WHITE : TEXT_DIM, cat->items[j].name);
+				sel ? TEXT_SELECTED : TEXT_DIM, cat->items[j].name);
 		}
 	}
 
 	// footer hint, right-aligned rather than pinned to the left edge.
 	{
 		const char *hint =
-			CH_PS1_DPAD_X " Category   "
-			CH_PS1_DPAD_Y " Item   "
+			CH_PS1_DPAD " Navigate   "
 			CH_PS1_CROSS_BUTTON " Select";
 
 		printString(
 			ctx, 308 - getStringWidth(hint), 214, TEXT_DIM, hint
 		);
 	}
+	endIntroMenuLayer(ctx, introOffset);
 }
 
 void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 	updateUIState(state, buttons);
+
+	/* Consume input without navigating until the grid is fully settled. The
+	 * value 30 is held until this update, so the final zero-offset frame is
+	 * also locked and cannot be disturbed by a repeating D-pad direction. */
+	if (introSlideFrame >= 0) {
+		if (introSlideFrame >= 30)
+			introSlideFrame = -1;
+		return;
+	}
 
 	uint16_t nav = state->buttonsPressed | state->buttonsRepeating;
 

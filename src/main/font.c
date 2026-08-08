@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "common/gpu.h"
 #include "main/font.h"
+#include "main/icon.h"
 #include "main/renderer.h"
 #include "ps1/gpucmd.h"
 
@@ -142,6 +143,49 @@ static const SpriteInfo fontSprites[] = {
 	{ .x = 88, .y = 54, .width =  6, .height =  8 }  // D-pad Up
 };
 
+typedef struct {
+	int glyph;
+	int width;
+	int height;
+	int yOffset;
+} InlinePadGlyph;
+
+/* Controller prompt bytes are rendered from the pad tester atlas. At 14x12
+ * they remain readable in ten-pixel text rows without colliding with the
+ * next 12-pixel footer line. D-pad X/Y intentionally resolve to the new full
+ * navigation glyph as well; new UI text uses a single "Navigate" prompt. */
+static bool getInlinePadGlyph(uint8_t ch, InlinePadGlyph *out) {
+	out->width = 14;
+	out->height = 12;
+	out->yOffset = -1;
+
+	switch (ch) {
+		case 0x80:
+		case 0x81:
+		case 0x82:
+			out->glyph = PAD_GLYPH_NAVIGATE;
+			out->width = 12;
+			return true;
+		case 0x83: out->glyph = PAD_GLYPH_CIRCLE;    return true;
+		case 0x84: out->glyph = PAD_GLYPH_CROSS;     return true;
+		case 0x85: out->glyph = PAD_GLYPH_TRIANGLE;  return true;
+		case 0x86: out->glyph = PAD_GLYPH_SQUARE;    return true;
+		case 0x87: out->glyph = PAD_GLYPH_SELECT;    return true;
+		case 0x88: out->glyph = PAD_GLYPH_START;     return true;
+		case 0x89: out->glyph = PAD_GLYPH_DPAD_UP;   return true;
+		case 0x8a: out->glyph = PAD_GLYPH_L1;        return true;
+		case 0x8b: out->glyph = PAD_GLYPH_R1;        return true;
+		case 0x8c: out->glyph = PAD_GLYPH_L2;        return true;
+		case 0x8d: out->glyph = PAD_GLYPH_R2;        return true;
+		default:                                      return false;
+	}
+}
+
+static void selectFontPage(RenderContext *ctx) {
+	uint32_t *page = allocateGP0Packet(getCurrentChain(ctx), 1);
+	page[0] = gp0_setPage(ctx->font.page, false, false);
+}
+
 void printString(
 	RenderContext *ctx,
 	int           x,
@@ -158,11 +202,21 @@ void printString(
 
 	uint32_t *ptr;
 
-	ptr    = allocateGP0Packet(chain, 1);
-	ptr[0] = gp0_setPage(ctx->font.page, false, false);
+	selectFontPage(ctx);
 
 	for (; *str; str++) {
 		uint8_t ch = (uint8_t) *str;
+		InlinePadGlyph padGlyph;
+
+		if (getInlinePadGlyph(ch, &padGlyph)) {
+			drawPadGlyphSized(ctx, padGlyph.glyph, currentX,
+				currentY + padGlyph.yOffset, padGlyph.width, padGlyph.height,
+				0x808080u);
+			currentX += padGlyph.width;
+			/* drawPadGlyphSized() selected the controller atlas page. */
+			selectFontPage(ctx);
+			continue;
+		}
 
 		switch (ch) {
 			case '\t':
@@ -220,6 +274,12 @@ int getStringWidth(const char *str) {
 		// renders 144px, which is why it was drawn about twice as wide as
 		// its contents.
 		uint8_t ch = (uint8_t) *str;
+		InlinePadGlyph padGlyph;
+
+		if (getInlinePadGlyph(ch, &padGlyph)) {
+			currentX += padGlyph.width;
+			continue;
+		}
 
 		switch (ch) {
 			case '\t':
@@ -281,11 +341,22 @@ void printStringScaled(
 
 	uint32_t *ptr;
 
-	ptr    = allocateGP0Packet(chain, 1);
-	ptr[0] = gp0_setPage(ctx->font.page, false, false);
+	selectFontPage(ctx);
 
 	for (; *str; str++) {
 		uint8_t ch = (uint8_t) *str;
+		InlinePadGlyph padGlyph;
+
+		if (getInlinePadGlyph(ch, &padGlyph)) {
+			int dw = scaleDim(padGlyph.width, scalePercent);
+			int dh = scaleDim(padGlyph.height, scalePercent);
+			int dy = scaleDim(padGlyph.yOffset, scalePercent);
+			drawPadGlyphSized(ctx, padGlyph.glyph, currentX, currentY + dy,
+				dw, dh, 0x808080u);
+			currentX += dw;
+			selectFontPage(ctx);
+			continue;
+		}
 
 		switch (ch) {
 			case '\t':
@@ -344,88 +415,18 @@ int getStringWidthScaled(const char *str, int scalePercent) {
 	return scaleDim(native, scalePercent);
 }
 
-/*
- * D-pad direction glyph, rotated in 90-degree steps.
- *
- * printString cannot do this: it draws every glyph with the GPU's Rectangle
- * primitive, which has a single fixed texture origin and size and no notion
- * of rotation. A genuine 4-vertex textured quad does not have that
- * limitation - each corner gets its own UV coordinate, so "rotating" the
- * image is just choosing which texture corner lands on which screen corner.
- * Since both texture space and screen space use the same y-down convention
- * on this hardware, that is a standard image-rotation-by-corner-permutation
- * problem, and the same one icon.c's iconQuad() already solves for icons -
- * this reuses that primitive shape, just for the one font glyph at 0x89.
- *
- * Always drawn in the glyph's true colours (a neutral 0x808080 vertex
- * colour), matching how every other button glyph in this font ignores the
- * colour passed to printString and shows its own baked-in colour.
- */
+/* Direction prompts now use the pad tester's four purpose-drawn cells rather
+ * than rotating the obsolete miniature copy stored in font.png. */
 void printDpadDirection(
 	RenderContext *ctx, int x, int y, DpadDirection direction
 ) {
-	const SpriteInfo *sprite = &fontSprites[0x89 - FONT_FIRST_TABLE_CHAR];
-
-	int u0 = ctx->font.u + sprite->x;
-	int v0 = ctx->font.v + sprite->y;
-	int u1 = u0 + sprite->width  - 1;
-	int v1 = v0 + sprite->height - 1;
-
-	// Destination size: swapped for the two sideways orientations, since the
-	// source glyph is not square (6x8).
-	int dstW = sprite->width;
-	int dstH = sprite->height;
-
-	if (direction == DPAD_DIR_RIGHT || direction == DPAD_DIR_LEFT) {
-		dstW = sprite->height;
-		dstH = sprite->width;
-	}
-
-	// Which texture corner (of the unrotated source) lands at each screen
-	// corner (TL/TR/BL/BR), derived from rotating the source image the
-	// requested number of 90-degree steps clockwise. "Up" is the identity
-	// case: no rotation, screen corners map straight to texture corners.
-	int tlU, tlV, trU, trV, blU, blV, brU, brV;
-
-	switch (direction) {
-		case DPAD_DIR_RIGHT: // source rotated 90 degrees clockwise
-			tlU = u0; tlV = v1;  trU = u0; trV = v0;
-			blU = u1; blV = v1;  brU = u1; brV = v0;
-			break;
-
-		case DPAD_DIR_DOWN: // 180 degrees
-			tlU = u1; tlV = v1;  trU = u0; trV = v1;
-			blU = u1; blV = v0;  brU = u0; brV = v0;
-			break;
-
-		case DPAD_DIR_LEFT: // 270 degrees clockwise (90 counter-clockwise)
-			tlU = u1; tlV = v0;  trU = u1; trV = v1;
-			blU = u0; blV = v0;  brU = u0; brV = v1;
-			break;
-
-		case DPAD_DIR_UP:
-		default:
-			tlU = u0; tlV = v0;  trU = u1; trV = v0;
-			blU = u0; blV = v1;  brU = u1; brV = v1;
-			break;
-	}
-
-	GPUDMAChain *chain = getCurrentChain(ctx);
-
-	uint32_t *page = allocateGP0Packet(chain, 1);
-	page[0] = gp0_setPage(ctx->font.page, false, false);
-
-	// Flat-shaded textured quad: cmd+colour, then 4 corners of (xy, uv). Same
-	// 9-word layout as icon.c's iconQuad(). Vertex order is TL, TR, BL, BR -
-	// the GPU forms the two triangles TL-TR-BL and TR-BL-BR from that.
-	uint32_t *ptr = allocateGP0Packet(chain, 9);
-	ptr[0] = 0x808080u | gp0_shadedQuad(false, true, true);
-	ptr[1] = gp0_xy(x, y);
-	ptr[2] = gp0_uv(tlU, tlV, ctx->font.clut);
-	ptr[3] = gp0_xy(x + dstW, y);
-	ptr[4] = gp0_uv(trU, trV, ctx->font.page);
-	ptr[5] = gp0_xy(x, y + dstH);
-	ptr[6] = gp0_uv(blU, blV, 0);
-	ptr[7] = gp0_xy(x + dstW, y + dstH);
-	ptr[8] = gp0_uv(brU, brV, 0);
+	static const int glyphs[] = {
+		PAD_GLYPH_DPAD_UP,
+		PAD_GLYPH_DPAD_RIGHT,
+		PAD_GLYPH_DPAD_DOWN,
+		PAD_GLYPH_DPAD_LEFT
+	};
+	int index = (direction >= DPAD_DIR_UP && direction <= DPAD_DIR_LEFT)
+		? direction : DPAD_DIR_UP;
+	drawPadGlyphSized(ctx, glyphs[index], x, y, 14, 12, 0x808080u);
 }

@@ -280,6 +280,34 @@ static bool detectMemoryCard(int port, uint8_t response[9]) {
 	// third-party cards.
 	return (response[1] == 0x5a) && (response[2] == 0x5d);
 }
+
+bool memoryCardPresent(int port) {
+	if (port < 0 || port > 1)
+		return false;
+
+	uint8_t response[9];
+	return detectMemoryCard(port, response);
+}
+
+bool memoryCardReadSector(int port, uint16_t sector, uint8_t data[128]) {
+	if (port < 0 || port > 1 || !data)
+		return false;
+
+	size_t respLength;
+	uint8_t header[9];
+	return readMemoryCardSector(
+		port, sector, data, &respLength, header
+	) == 0x47;
+}
+
+bool memoryCardWriteSector(
+	int port, uint16_t sector, const uint8_t data[128]
+) {
+	if (port < 0 || port > 1 || !data)
+		return false;
+
+	return writeMemoryCardSector(port, sector, data) == 0x47;
+}
 /* ---- Directory parsing ----
  *
  * Allocation state byte: 0x51 (first block of a used file) and 0xA1
@@ -1490,7 +1518,8 @@ void runMemoryCardManager(
 
 				if (!present[slot]) {
 					printString(ctx, baseX, MC_GRID_Y, 0x808080, "(empty)");
-					printString(ctx, baseX, MC_GRID_Y + 14, 0x505050, "START");
+					printString(ctx, baseX, MC_GRID_Y + 14, 0x505050,
+						CH_PS1_START_BUTTON);
 					printString(ctx, baseX, MC_GRID_Y + 26, 0x505050, "to scan");
 					continue;
 				}
@@ -1658,19 +1687,21 @@ void runMemoryCardManager(
 				// nothing to open, so the only useful action is the refresh -
 				// say so here rather than listing controls that do nothing.
 				if (!present[0] && !present[1])
-					printString(ctx, 16, 202, 0x505050,
+					printString(ctx, 16, 204, 0x505050,
 						CH_PS1_START_BUTTON ": Refresh");
+				else if (present[0] && present[1])
+					printString(ctx, 16, 204, 0x505050,
+						CH_PS1_DPAD " Navigate   " CH_PS1_CROSS_BUTTON ": options   "
+						CH_PS1_L1_BUTTON "/" CH_PS1_R1_BUTTON ": card");
 				else
-					printString(ctx, 16, 202, 0x505050,
-						"D-PAD select   " CH_PS1_CROSS_BUTTON ": options");
-				if (present[0] && present[1])
-					printString(ctx, 16, 212, 0x505050, "L1/R1: switch card   START: refresh");
-				else
-					printString(ctx, 16, 212, 0x505050, "START: refresh cards");
+					printString(ctx, 16, 204, 0x505050,
+						CH_PS1_DPAD " Navigate   " CH_PS1_CROSS_BUTTON ": options");
 			}
 		}
 
-		printString(ctx, 16, 220, 0x505050, "START+SELECT: return to menu");
+		printString(ctx, 16, 220, 0x505050,
+			CH_PS1_START_BUTTON ": refresh   "
+			CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON " Return to menu");
 
 		endFrame(ctx);
 	}

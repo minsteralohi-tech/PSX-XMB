@@ -188,14 +188,14 @@ static const struct { uint16_t mask; const char *name; } BUTTON_NAMES[] = {
 	{ PAD_BTN_DOWN,     "D"                     },
 	{ PAD_BTN_LEFT,     "L"                     },
 	{ PAD_BTN_RIGHT,    "R"                     },
-	{ PAD_BTN_L1,       "L1"                    },
-	{ PAD_BTN_L2,       "L2"                    },
+	{ PAD_BTN_L1,       CH_PS1_L1_BUTTON         },
+	{ PAD_BTN_L2,       CH_PS1_L2_BUTTON         },
 	{ PAD_BTN_L3,       "L3"                    },
-	{ PAD_BTN_R1,       "R1"                    },
-	{ PAD_BTN_R2,       "R2"                    },
+	{ PAD_BTN_R1,       CH_PS1_R1_BUTTON         },
+	{ PAD_BTN_R2,       CH_PS1_R2_BUTTON         },
 	{ PAD_BTN_R3,       "R3"                    },
-	{ PAD_BTN_SELECT,   "SEL"                   },
-	{ PAD_BTN_START,    "STA"                   },
+	{ PAD_BTN_SELECT,   CH_PS1_SELECT_BUTTON     },
+	{ PAD_BTN_START,    CH_PS1_START_BUTTON      },
 	{ PAD_BTN_TRIANGLE, CH_PS1_TRIANGLE_BUTTON   },
 	{ PAD_BTN_CIRCLE,   CH_PS1_CIRCLE_BUTTON     },
 	{ PAD_BTN_CROSS,    CH_PS1_CROSS_BUTTON      },
@@ -436,8 +436,12 @@ void runPadTest(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
-		printString(ctx, 16, 210, 0x505050, "L1+R1: small motor   L2+R2: big motor (both ports)");
-		printString(ctx, 16, 222, 0x505050, "PORT 1 START+SELECT: return to menu");
+		printString(ctx, 16, 208, 0x505050,
+			CH_PS1_L1_BUTTON "+" CH_PS1_R1_BUTTON ": small motor   "
+			CH_PS1_L2_BUTTON "+" CH_PS1_R2_BUTTON ": big motor (both ports)");
+		printString(ctx, 16, 224, 0x505050,
+			"PORT 1 " CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON
+			" Return to menu");
 
 		drawPad(ctx, 0,          0, &pads[0]);
 		drawPad(ctx, HALF_WIDTH, 1, &pads[1]);

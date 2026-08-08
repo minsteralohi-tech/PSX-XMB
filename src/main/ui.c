@@ -146,11 +146,11 @@ int findFirstSelectableItem(const MenuItem *menu) {
 
 static const char *menuButtonPrompts[] = {
 	[ITEM_ACTION] =
-		CH_PS1_DPAD " Move   "
-		CH_PS1_CIRCLE_BUTTON CH_PS1_CROSS_BUTTON " Select",
-	[ITEM_INT]    = CH_PS1_DPAD " Move   " CH_PS1_DPAD_X " Adjust",
-	[ITEM_BINARY] = CH_PS1_DPAD " Move   " CH_PS1_DPAD_X " Adjust",
-	[ITEM_ENUM]   = CH_PS1_DPAD " Move   " CH_PS1_DPAD_X " Adjust"
+		CH_PS1_DPAD " Navigate   "
+		CH_PS1_CROSS_BUTTON " Select   " CH_PS1_CIRCLE_BUTTON " Back",
+	[ITEM_INT]    = CH_PS1_DPAD " Navigate / Adjust",
+	[ITEM_BINARY] = CH_PS1_DPAD " Navigate / Adjust",
+	[ITEM_ENUM]   = CH_PS1_DPAD " Navigate / Adjust"
 };
 
 // True for the RAM tester and RAM config screens - the only screens in the

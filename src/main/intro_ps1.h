@@ -69,12 +69,17 @@ typedef enum {
 	PS1_INTRO_GLASS,         /* the same mark drawn semi-transparent        */
 	PS1_INTRO_SPIN,          /* the same flat mark, spun once               */
 	PS1_INTRO_WHITE_RIBBONS, /* solid mark over white ribbons + sparkles    */
+	PS1_INTRO_FAR_ORANGE,    /* Classic clone: orange mark arrives from far */
+	PS1_INTRO_RIBBON_FAR_150,/* White Ribbons clone: 1.50 second arrival    */
+	PS1_INTRO_RIBBON_FAR_125,/* White Ribbons clone: 1.25 second arrival    */
+	PS1_INTRO_RIBBON_FAR_100,/* White Ribbons clone: 1.00 second arrival    */
 	PS1_INTRO_COUNT
 } PS1IntroVariant;
 
-/* Keep the four SCE styles selectable while the intro is still being tuned.
- * The pose/effect editor is also available permanently under Hardware Tester. */
-#define PS1_BOOT_SHOW_MENU 1
+/* Normal boot now uses the finalized 1.25-second White Ribbons intro without
+ * stopping at the experiment picker. The complete picker remains available
+ * as "Intro Style Test" under Hardware Tester. */
+#define PS1_BOOT_SHOW_MENU 0
 
 /* Show the variant picker and return the chosen one. */
 int chooseIntroVariant(RenderContext *ctx);
@@ -89,9 +94,12 @@ void initPS1Boot(RenderContext *ctx);
  * backdrop effects and material animations without replaying the boot menu. */
 void runPSLogoPoseTool(RenderContext *ctx);
 
+/* Run the former startup picker and preview the selected complete intro. */
+void runPS1IntroStyleTest(RenderContext *ctx);
+
 /*
- * Play the sequence, about 15.47 seconds. Returns when it finishes or the
- * user presses anything.
+ * Play the sequence: about 16-17 seconds depending on the arrival experiment.
+ * Returns when it finishes or the user presses anything.
  */
 void runPS1Boot(RenderContext *ctx);
 

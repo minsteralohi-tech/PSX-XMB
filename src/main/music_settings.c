@@ -176,11 +176,11 @@ void runMusicSettings(RenderContext *ctx, UIState *state, const MenuItem *item) 
 
 		if (valueOpen)
 			printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
-				CH_PS1_DPAD_Y " Select   " CH_PS1_CROSS_BUTTON " Confirm   "
+				CH_PS1_DPAD " Navigate   " CH_PS1_CROSS_BUTTON " Confirm   "
 				CH_PS1_CIRCLE_BUTTON " Back");
 		else
 			printString(ctx, 16, ctx->screenHeight - 26, 0x606060,
-				CH_PS1_DPAD_Y " Select   " CH_PS1_CROSS_BUTTON " Open   "
+				CH_PS1_DPAD " Navigate   " CH_PS1_CROSS_BUTTON " Open   "
 				CH_PS1_CIRCLE_BUTTON " Back");
 
 		endFrame(ctx);

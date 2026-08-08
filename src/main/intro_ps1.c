@@ -161,8 +161,9 @@ extern const uint8_t introPsTextTexture[], introPsTextPalette[];
 
 static TextureInfo sonyTex, computerTex, enterTex, tmTex, psLogoTex, psTextTex;
 
-/* Which look to use, chosen from the boot menu. See PS1IntroVariant. */
-static int introVariant = PS1_INTRO_CLASSIC;
+/* Final normal-boot look: White Ribbons with the 1.25-second orange arrival.
+ * The Hardware Tester preview temporarily replaces this selection. */
+static int introVariant = PS1_INTRO_RIBBON_FAR_125;
 
 /*
  * Spin support.
@@ -204,13 +205,11 @@ static void rotatePoint(int cx, int cy, int *x, int *y) {
 #define T_PS_CREDITS   402
 #define T_PS_TEXT      405
 #define T_PS_TEXT_END  429
-#define T_ALL_OUT      870
-#define T_ALL_OUT_END  879
-#define T_MENU_BG_IN   T_ALL_OUT_END
-#define T_MENU_BG_END  909
-#define T_LOGO_OUT     T_MENU_BG_END
-#define T_LOGO_OUT_END 927
-#define T_END          928
+#define T_HANDOFF             870
+#define T_THEME_GRADIENT_END  (T_HANDOFF + 30)
+#define T_THEME_REVEAL_END    (T_THEME_GRADIENT_END + 30)
+#define T_LOGO_RETREAT_END    (T_THEME_REVEAL_END + 30)
+#define T_END                 T_LOGO_RETREAT_END
 
 /*
  * The CSS lays the whole animation out inside a square (100vmin), so on a
@@ -266,6 +265,13 @@ static int ramp(int frame, int start, int end) {
 		return 256;
 
 	return (frame - start) * 256 / (end - start);
+}
+
+/* Exactly thirty displayed frames, reaching 256 on the thirtieth. This is
+ * used only by the four 0.5-second handoff stages; the earlier BIOS timing
+ * keeps its original endpoint-based ramp above. */
+static int handoffRamp(int frame, int start) {
+	return clampi(((frame - start + 1) * 256) / 30, 0, 256);
 }
 
 /* --- primitives ------------------------------------------------------- */
@@ -372,7 +378,7 @@ static void spriteFadeOnLight(
  * Variants
  *
  * These are ADJUSTMENTS to the original mark, not redesigns. The geometry,
- * the colours and the timeline are identical in all four - the first attempt
+ * the colours and the base timeline are identical in the original four - the first attempt
  * replaced the artwork with new shapes, which was the wrong idea. What
  * changes is only how the same quads are drawn:
  *
@@ -380,11 +386,45 @@ static void spriteFadeOnLight(
  *   Glass         the same quads, blended, so the background shows through
  *   Spin          the same flat quads, rotated about the centre once
  *   White Ribbons the same solid mark, over white ribbons and sparkles
+ *   Far Orange    a Classic clone with a two-second distance arrival first
+ *   Ribbon Far    three White Ribbons clones at 1.50 / 1.25 / 1.00 seconds
  * ===================================================================== */
 
 void setPS1IntroVariant(int variant) {
-	if (variant >= 0 && variant < PS1_INTRO_COUNT)
+	if (variant >= 0 && variant < PS1_INTRO_COUNT) {
 		introVariant = variant;
+		/* These three experiments deliberately keep their assigned theme
+		 * active after the intro so the same handoff can be compared against
+		 * three very different real menu backgrounds. */
+		switch (variant) {
+			case PS1_INTRO_RIBBON_FAR_150:
+				xmbThemeIndex = XMB_THEME_GOURAUD_SPARKLE;
+				break;
+			case PS1_INTRO_RIBBON_FAR_125:
+				xmbThemeIndex = XMB_THEME_NEBULA3;
+				break;
+			case PS1_INTRO_RIBBON_FAR_100:
+				xmbThemeIndex = XMB_THEME_COSMOS_3D_PP;
+				break;
+		}
+	}
+}
+
+static int introArrivalFrames(void) {
+	switch (introVariant) {
+		case PS1_INTRO_FAR_ORANGE:     return 120;
+		case PS1_INTRO_RIBBON_FAR_150: return 90;
+		case PS1_INTRO_RIBBON_FAR_125: return 75;
+		case PS1_INTRO_RIBBON_FAR_100: return 60;
+		default:                       return 0;
+	}
+}
+
+static bool introUsesWhiteRibbons(void) {
+	return introVariant == PS1_INTRO_WHITE_RIBBONS
+		|| introVariant == PS1_INTRO_RIBBON_FAR_150
+		|| introVariant == PS1_INTRO_RIBBON_FAR_125
+		|| introVariant == PS1_INTRO_RIBBON_FAR_100;
 }
 
 /*
@@ -449,6 +489,51 @@ void initPS1Boot(RenderContext *ctx) {
 
 /* --- the SCE (white) screen ------------------------------------------- */
 
+/* Draw the orange diamond at an arbitrary scale/brightness. Keeping the
+ * entrance and the normal SCE renderer on this same primitive is what makes
+ * the experimental mark land without changing shape or colour by one pixel. */
+static void drawSceDiamond(
+	RenderContext *ctx, int cx, int cy, int rx, int ry, int level
+) {
+	const uint32_t edge   = 0x0517e0;   /* 0xBBGGRR of #E01705 */
+	const uint32_t centre = 0x0093df;   /* 0xBBGGRR of #DF9300 */
+	uint32_t e = edge, c = centre;
+
+	if (level <= 0 || rx <= 0 || ry <= 0)
+		return;
+	if (level < 256) {
+		int k = level;
+		uint32_t er = ((edge        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
+		uint32_t eg = (((edge >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
+		uint32_t eb = (((edge >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
+		uint32_t cr = ((centre        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
+		uint32_t cg = (((centre >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
+		uint32_t cb = (((centre >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
+		e = (eb << 16) | (eg << 8) | er;
+		c = (cb << 16) | (cg << 8) | cr;
+	}
+
+	gouraudQuad(ctx,
+		cx - rx, cy,      e,
+		cx,      cy - ry, c,
+		cx,      cy + ry, c,
+		cx + rx, cy,      e);
+}
+
+/* Arrival-option pre-roll: from effectively nothing to the exact
+ * full-size diamond used by drawSceScreen(). Squaring the smoothstep scale
+ * holds it at a distant size longer, then gives a strong depth-like approach
+ * with zero arrival velocity. */
+static void drawFarOrangeArrival(RenderContext *ctx, int frame, int duration) {
+	int k = clampi(((frame + 1) * 256) / duration, 0, 256);
+	int ease = (k * k * (768 - 2 * k)) >> 16;
+	int scale = (ease * ease) >> 8;
+	drawSceDiamond(ctx, SQ_CX, SQ_CY,
+		((SQW / 4) * scale) >> 8,
+		((SQH / 4) * scale) >> 8,
+		ease);
+}
+
 static void drawSceScreen(RenderContext *ctx, int frame) {
 	/*
 	 * Spin variant: one full turn over the same window the triangles
@@ -467,11 +552,9 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	}
 
 	// The CSS gradient is horizontal: #E01705 at both edges, #DF9300 in the
-	// middle. On a rhombus whose left and right corners sit at the edges and
-	// whose top and bottom corners sit at the centre, that is exactly a
-	// four-vertex Gouraud fill - no gradient texture needed.
-	const uint32_t edge   = 0x0517e0;   /* 0xBBGGRR of #E01705 */
-	const uint32_t centre = 0x0093df;   /* 0xBBGGRR of #DF9300 */
+	// middle. The shared helper below emits that exact Gouraud diamond.
+	const uint32_t edge   = 0x0517e0;
+	const uint32_t centre = 0x0093df;
 
 	int cx = SQ_CX;
 	int cy = SQ_CY;
@@ -479,33 +562,12 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 	int ry = SQH / 4;
 
 	int level = ramp(frame, T_DIAMOND_IN, T_DIAMOND_IN_END);
-
-	if (level > 0) {
-		// Fading a solid shape in on the flat field: interpolate its colour
-		// from the field toward the real one, which is smooth and costs
-		// nothing.
-		uint32_t e = edge, c = centre;
-
-		if (level < 256) {
-			int k = level;
-			uint32_t er = ((edge        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
-			uint32_t eg = (((edge >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
-			uint32_t eb = (((edge >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
-			uint32_t cr = ((centre        & 0xff) * k + SCE_FIELD_R * (256 - k)) >> 8;
-			uint32_t cg = (((centre >> 8)  & 0xff) * k + SCE_FIELD_G * (256 - k)) >> 8;
-			uint32_t cb = (((centre >> 16) & 0xff) * k + SCE_FIELD_B * (256 - k)) >> 8;
-			e = (eb << 16) | (eg << 8) | er;
-			c = (cb << 16) | (cg << 8) | cr;
-		}
-
-		// TL, TR, BL, BR order: top and bottom points are the centre colour,
-		// left and right points the edge colour.
-		gouraudQuad(ctx,
-			cx - rx, cy,      e,
-			cx,      cy - ry, c,
-			cx,      cy + ry, c,
-			cx + rx, cy,      e);
-	}
+	/* Far Orange has already landed as a fully opaque diamond. Hold that
+	 * exact result through the old six-frame fade window so the restarted
+	 * internal animation cannot flash back to the white field. */
+	if (introArrivalFrames() && frame < T_DIAMOND_IN_END)
+		level = 256;
+	drawSceDiamond(ctx, cx, cy, rx, ry, level);
 
 	/*
 	 * The two triangles.
@@ -597,7 +659,7 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  *
  * The animation is a straight interpolation between the two blocks below, so
  * these twelve numbers ARE the animation - there is nothing else to it. The
- * pose tool on the boot menu (entry 5) edits exactly these, live, and prints
+ * pose tool on the boot menu (entry 9) edits exactly these, live, and prints
  * them back in this form; read them off the screen and paste them here.
  *
  * Angles are degrees, offsets from the BIOS resting pose baked into the model.
@@ -652,22 +714,21 @@ static int poseLerp(int from, int to, int ease) {
 	return from + ((to - from) * ease) / 256;
 }
 
-static void drawPsScreen(RenderContext *ctx, int frame) {
+static void drawPsScreen(RenderContext *ctx, int frame, int transitionFrame) {
 	int logoLevel    = ramp(frame, T_PS_LOGO, T_PS_LOGO_END);
 	int textLevel    = ramp(frame, T_PS_TEXT, T_PS_TEXT_END);
 	int creditsLevel = frame >= T_PS_CREDITS ? 256 : 0;
 
-	if (frame >= T_ALL_OUT) {
-		int out = 256 - ramp(frame, T_ALL_OUT, T_ALL_OUT_END);
+	if (transitionFrame >= T_HANDOFF) {
+		int out = 256 - handoffRamp(transitionFrame, T_HANDOFF);
 
 		textLevel    = (textLevel    * out) >> 8;
 		creditsLevel = (creditsLevel * out) >> 8;
 	}
-	/* During the handoff every PS-screen element except the 3D logo has
-	 * already gone. Hold C over the incoming live menu theme, then fade only
-	 * the logo so the category ribbon can appear on the following frame. */
-	if (frame >= T_LOGO_OUT) {
-		int out = 256 - ramp(frame, T_LOGO_OUT, T_LOGO_OUT_END);
+	/* Stage three sends C back toward the exact pose it originally arrived
+	 * from while fading it. The live menu background remains uninterrupted. */
+	if (transitionFrame >= T_THEME_REVEAL_END) {
+		int out = 256 - handoffRamp(transitionFrame, T_THEME_REVEAL_END);
 		logoLevel = (logoLevel * out) >> 8;
 	}
 
@@ -689,18 +750,25 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 		int inv  = 256 - k;
 		int ease = 256 - ((((inv * inv) >> 8) * inv) >> 8);   /* 0 -> 256 */
 		int logoEffect = PS_LOGO_EFFECT;
-		int backdropDarkness = 0;
+		int backdropLevel = 256;
 
-		if (frame >= T_MENU_BG_IN) {
-			/* The selected menu theme is already underneath us; reveal it
-			 * while suppressing the old Cosmos backdrop completely. */
+		if (transitionFrame >= T_THEME_GRADIENT_END) {
+			/* The real selected theme renderer now owns the background. Effect
+			 * 0 leaves C alone over it instead of drawing a second Cosmos. */
 			logoEffect = 0;
-			backdropDarkness = 256
-				- ramp(frame, T_MENU_BG_IN, T_MENU_BG_END);
-		} else if (frame >= T_ALL_OUT) {
-			/* First take the Black PS screen cleanly down to black while C
-			 * stays bright and stationary. */
-			backdropDarkness = ramp(frame, T_ALL_OUT, T_ALL_OUT_END);
+			backdropLevel = 0;
+		} else if (transitionFrame >= T_HANDOFF) {
+			/* The selected theme base fades in beneath the Cosmos foreground,
+			 * while those stars/cubes/nebula shrink and fade away smoothly. */
+			backdropLevel = 256 - handoffRamp(transitionFrame, T_HANDOFF);
+		}
+
+		if (transitionFrame >= T_THEME_REVEAL_END) {
+			/* Smoothstep has zero velocity at both ends, so the held END pose
+			 * cannot jerk when the retreat starts or when it disappears. */
+			int retreat = handoffRamp(transitionFrame, T_THEME_REVEAL_END);
+			int retreatEase = (retreat * retreat * (768 - 2 * retreat)) >> 16;
+			ease = 256 - retreatEase;
 		}
 
 		xmbDrawIntroPSLogo(ctx, PS_LOGO_MODEL,
@@ -715,7 +783,7 @@ static void drawPsScreen(RenderContext *ctx, int frame) {
 			(frame >= T_PS_LOGO + PS_LOGO_MOVE_FRAMES)
 				? (uint32_t) (frame - (T_PS_LOGO + PS_LOGO_MOVE_FRAMES))
 				: 0,
-			backdropDarkness);
+			backdropLevel);
 #elif PS1_BOOT_TEXTURES
 		// The old flat sprite. Bright artwork on black: scaling the vertex
 		// colour gives a genuinely smooth fade, because the GPU modulates
@@ -904,7 +972,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 			shown[POSE_X], shown[POSE_Y], shown[POSE_CAM_Z],
 			DEG(shown[POSE_YAW]), DEG(shown[POSE_PITCH]),
 			DEG(shown[POSE_ROLL]), 256, shade,
-			effect, anim, fxFrame++, settledFrames, 0);
+			effect, anim, fxFrame++, settledFrames, 256);
 
 		printString(ctx, 8, 8, 0xffffff, "PS LOGO POSE");
 		printString(ctx, 104, 8, 0x40c0ff,
@@ -914,7 +982,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 		int shadeCount = xmbIntroPSLogoShadeCount(model);
 		if (shadeCount > 1) {
 			char line[48];
-			snprintf(line, sizeof(line), "R1 SHADOW %d/%d  %s",
+			snprintf(line, sizeof(line), CH_PS1_R1_BUTTON " SHADOW %d/%d  %s",
 				shade + 1, shadeCount,
 				xmbIntroPSLogoShadeName(model, shade));
 			printString(ctx, 8, 90, 0xffa040, line);
@@ -923,7 +991,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 		int effectCount = xmbIntroPSLogoEffectCount(model);
 		if (effectCount > 1) {
 			char line[48];
-			snprintf(line, sizeof(line), "R2 EFFECT %d/%d  %s",
+			snprintf(line, sizeof(line), CH_PS1_R2_BUTTON " EFFECT %d/%d  %s",
 				effect + 1, effectCount,
 				xmbIntroPSLogoEffectName(model, effect));
 			printString(ctx, 8, 100, 0x70c0ff, line);
@@ -932,7 +1000,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 		int animCount = xmbIntroPSLogoAnimCount(model);
 		if (animCount > 1) {
 			char line[48];
-			snprintf(line, sizeof(line), "L2 ANIM %d/%d  %s",
+			snprintf(line, sizeof(line), CH_PS1_L2_BUTTON " ANIM %d/%d  %s",
 				anim + 1, animCount,
 				xmbIntroPSLogoAnimName(model, anim));
 			printString(ctx, 8, 110, 0xc080ff, line);
@@ -947,16 +1015,20 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 			printString(ctx, 8, y, (i == sel) ? 0xffffff : 0x909090, line);
 		}
 
-		printString(ctx, 8, 210, 0x707070,
+		printString(ctx, 8, 208, 0x707070,
 			CH_PS1_TRIANGLE_BUTTON " start/end   "
 			CH_PS1_SQUARE_BUTTON " preview   "
 			CH_PS1_CIRCLE_BUTTON " back");
-		printString(ctx, 8, 222, 0x707070,
+		printString(ctx, 8, 224, 0x707070,
 			(model == 2)
-				? "D-PAD adjust L1 model R2 FX L2 anim"
+				? CH_PS1_DPAD " Adjust " CH_PS1_L1_BUTTON " Model "
+					CH_PS1_R2_BUTTON " FX " CH_PS1_L2_BUTTON " Anim"
 				: (shadeCount > 1)
-				? "D-PAD adjust L1 model R1 shade R2 FX L2 anim"
-				: "D-PAD pick/adjust   R1 x10   L1 model");
+				? CH_PS1_DPAD " Adjust " CH_PS1_L1_BUTTON " Model "
+					CH_PS1_R1_BUTTON " Shade " CH_PS1_R2_BUTTON " FX "
+					CH_PS1_L2_BUTTON " Anim"
+				: CH_PS1_DPAD " Pick/adjust   " CH_PS1_R1_BUTTON " x10   "
+					CH_PS1_L1_BUTTON " Model");
 
 		endFrame(ctx);
 	}
@@ -983,7 +1055,11 @@ int chooseIntroVariant(RenderContext *ctx) {
 		"2  Glass          same logo, see-through",
 		"3  Spin           same logo, spun once",
 		"4  White Ribbons  solid logo, white ribbons",
-		"5  Logo pose tool  edit the 3D start/end",
+		"5  Far Orange     2-sec distant arrival",
+		"6  Ribbon Far 1.50  Gouraud Waves",
+		"7  Ribbon Far 1.25  Nebula 3",
+		"8  Ribbon Far 1.00  Cosmos 3D++1",
+		"9  Logo pose tool  edit the 3D start/end",
 	};
 
 	int sel = 0;
@@ -1020,7 +1096,7 @@ int chooseIntroVariant(RenderContext *ctx) {
 
 		printString(ctx, 16, 24, 0xffffff, "INTRO STYLE TEST");
 		printString(ctx, 16, 40, 0x808080,
-			"D-PAD choose      " CH_PS1_CROSS_BUTTON " start");
+			CH_PS1_DPAD " Navigate      " CH_PS1_CROSS_BUTTON " Start");
 
 		for (int i = 0; i < INTRO_MENU_COUNT; i++) {
 			printString(ctx, 24, 72 + i * 16,
@@ -1034,6 +1110,18 @@ int chooseIntroVariant(RenderContext *ctx) {
 		;
 
 	return sel;
+}
+
+void runPS1IntroStyleTest(RenderContext *ctx) {
+	/* Preserve the finalized normal-boot selection after this one preview.
+	 * The preview's assigned theme deliberately remains active so the complete
+	 * intro-to-menu handoff can be judged against that real background. */
+	int savedVariant = introVariant;
+	setPS1IntroVariant(chooseIntroVariant(ctx));
+	initPS1Boot(ctx);
+	runPS1Boot(ctx);
+	reloadTextures(ctx);
+	introVariant = savedVariant;
 }
 
 void runPS1Boot(RenderContext *ctx) {
@@ -1057,7 +1145,17 @@ void runPS1Boot(RenderContext *ctx) {
 	// a skip.
 	playIntroJingle();
 
-	for (int frame = 0; frame < T_END; frame++) {
+	/* Every distance-arrival variant delays the white-screen content by its
+	 * selected duration. The Black PS section then receives the same timing
+	 * treatment requested for option 5: two seconds removed, one second added
+	 * back as animation (net -60 frames). Therefore total length changes by
+	 * arrivalFrames - 60, while all animation speeds themselves stay intact. */
+	int whiteDelay = introArrivalFrames();
+	bool farOrange = whiteDelay > 0;
+	int handoffDelay = farOrange ? whiteDelay - 60 : 0;
+	int sequenceEnd = T_END + handoffDelay;
+
+	for (int frame = 0; frame < sequenceEnd; frame++) {
 		uint16_t buttons = pollController(0) | pollController(1);
 
 		if (!buttons)
@@ -1067,7 +1165,9 @@ void runPS1Boot(RenderContext *ctx) {
 
 		beginFrame(ctx);
 
-		bool white = frame < T_TO_BLACK;
+		int contentFrame = frame - whiteDelay;
+		int transitionFrame = frame - handoffDelay;
+		bool white = contentFrame < T_TO_BLACK;
 
 		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
 			white ? SCE_FIELD : 0x000000, false);
@@ -1081,25 +1181,38 @@ void runPS1Boot(RenderContext *ctx) {
 		 * alone - the previous version of this had to save it, overwrite
 		 * it and put it back.
 		 */
-		if (white && introVariant == PS1_INTRO_WHITE_RIBBONS)
+		if (white && introUsesWhiteRibbons())
 			xmbDrawIntroRibbons(ctx, SCE_FIELD);
 
 		if (white) {
-			int out = frame >= T_SCE_OUT
-			        ? 256 - ramp(frame, T_SCE_OUT, T_SCE_OUT_END)
+			int out = contentFrame >= T_SCE_OUT
+			        ? 256 - ramp(contentFrame, T_SCE_OUT, T_SCE_OUT_END)
 			        : 256;
 
-			if (out > 0)
-				drawSceScreen(ctx, frame);
+			if (farOrange && frame < whiteDelay)
+				drawFarOrangeArrival(ctx, frame, whiteDelay);
+			else if (out > 0)
+				drawSceScreen(ctx, contentFrame);
 		} else {
-			/* The final handoff renders the CURRENT menu theme without any
-			 * XMB UI. drawPsScreen() applies the generic fade above it and
-			 * redraws the held logo last. Because this follows xmbThemeIndex,
-			 * future persisted theme settings automatically use the same
-			 * transition with no theme-specific intro code. */
-			if (frame >= T_MENU_BG_IN)
+			/* Four-stage handoff, each stage exactly 30 frames at 60 Hz:
+			 *  1. the exact theme base gradient fades up across the full screen;
+			 *  2. its live elements grow from far away into normal positions;
+			 *  3. C retreats toward its START pose and fades;
+			 *  4. renderXMB slides the real UI in after this function returns.
+			 * The current xmbThemeIndex is used throughout, so saved themes can
+			 * plug into the sequence later without intro-specific branches. */
+			if (transitionFrame >= T_HANDOFF
+			 && transitionFrame < T_THEME_GRADIENT_END) {
+				drawXMBBackgroundBaseFade(ctx,
+					handoffRamp(transitionFrame, T_HANDOFF));
+			} else if (transitionFrame >= T_THEME_GRADIENT_END
+			 && transitionFrame < T_THEME_REVEAL_END) {
+				drawXMBBackgroundReveal(ctx,
+					handoffRamp(transitionFrame, T_THEME_GRADIENT_END));
+			} else if (transitionFrame >= T_THEME_REVEAL_END) {
 				drawXMBBackground(ctx);
-			drawPsScreen(ctx, frame);
+			}
+			drawPsScreen(ctx, contentFrame, transitionFrame);
 		}
 
 		endFrame(ctx);
@@ -1114,8 +1227,10 @@ void runPS1Boot(RenderContext *ctx) {
 			break;
 
 		beginFrame(ctx);
-		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
-			0x000000, false);
+		/* Keep the completed live theme visible while swallowing a held
+		 * skip button. The old black clear here could insert an otherwise
+		 * mysterious black frame immediately before the menu. */
+		drawXMBBackground(ctx);
 		endFrame(ctx);
 	}
 }

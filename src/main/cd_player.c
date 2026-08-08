@@ -257,7 +257,7 @@ static void applyReverbPreset(ReverbPreset preset) {
 #define CD_STATE_Y      140
 #define CD_VOLUME_Y     154
 #define CD_CONTROLS1_Y  172
-#define CD_CONTROLS2_Y  184
+#define CD_CONTROLS2_Y  188
 #define CD_EXIT_HINT_Y  204
 
 /* Video frames per second. PAL runs at 50, so the clock gains about a second
@@ -511,10 +511,13 @@ void runCDPlayer(
 				CH_PS1_CIRCLE_BUTTON " STOP   "
 				CH_PS1_TRIANGLE_BUTTON " REVERB"
 			);
-			printString(ctx, 16, CD_CONTROLS2_Y, 0x505050, "D-PAD select   R2/L2 volume");
+			printString(ctx, 16, CD_CONTROLS2_Y, 0x505050,
+				CH_PS1_DPAD " Navigate   "
+				CH_PS1_R2_BUTTON "/" CH_PS1_L2_BUTTON " Volume");
 		}
 
-		printString(ctx, 16, CD_EXIT_HINT_Y, 0x505050, "START+SELECT: return to menu");
+		printString(ctx, 16, CD_EXIT_HINT_Y, 0x505050,
+			CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON " Return to menu");
 
 		endFrame(ctx);
 	}

@@ -43,6 +43,59 @@
 static XMBBgStyle currentStyle   = XMB_BG_GOURAUD_WAVES;
 static uint32_t   xmbFrame       = 0;
 
+/* Intro-only theme transition state. The real theme renderer is reused so
+ * the base gradient and final element positions are exact. BASE_FADE keeps
+ * only the theme's first full-screen opaque quad and raises its RGB from
+ * black. ELEMENTS keeps that base fixed while every ordinary primitive grows
+ * out of one distant vanishing point and brightens into its normal position. */
+enum {
+	XMB_TRANSITION_NONE,
+	XMB_TRANSITION_BASE_FADE,
+	XMB_TRANSITION_ELEMENTS
+};
+static uint8_t xmbTransitionMode;
+static int xmbTransitionLevel = 256;
+static int xmbTransitionW, xmbTransitionH;
+static bool xmbTransitionBaseDrawn;
+
+static uint32_t transitionColor(uint32_t c) {
+	int r = (c & 0xff) * xmbTransitionLevel >> 8;
+	int g = ((c >> 8) & 0xff) * xmbTransitionLevel >> 8;
+	int b = ((c >> 16) & 0xff) * xmbTransitionLevel >> 8;
+	return gp0_rgb(r, g, b);
+}
+
+static int transitionGeometryScale(void) {
+	/* 3/16 size at the far point, then smoothly to full size. */
+	return 48 + ((256 - 48) * xmbTransitionLevel >> 8);
+}
+
+static void transitionPoint(int *x, int *y) {
+	int scale = transitionGeometryScale();
+	int cx = xmbTransitionW / 2;
+	int cy = (xmbTransitionH * 3) / 4;
+	*x = cx + ((*x - cx) * scale >> 8);
+	*y = cy + ((*y - cy) * scale >> 8);
+}
+
+static bool isFullBackdrop(
+	int x0, int y0, int x1, int y1,
+	int x2, int y2, int x3, int y3, bool blend
+) {
+	if (blend)
+		return false;
+	int minX = x0, maxX = x0, minY = y0, maxY = y0;
+	int xs[3] = { x1, x2, x3 }, ys[3] = { y1, y2, y3 };
+	for (int i = 0; i < 3; i++) {
+		if (xs[i] < minX) minX = xs[i];
+		if (xs[i] > maxX) maxX = xs[i];
+		if (ys[i] < minY) minY = ys[i];
+		if (ys[i] > maxY) maxY = ys[i];
+	}
+	return minX <= 0 && minY <= 0
+		&& maxX >= xmbTransitionW && maxY >= xmbTransitionH;
+}
+
 /* User-facing theme picker: names shown in the menu, and the style each one
  * maps to. Keep these two arrays in the same order, XMB_THEME_COUNT long. */
 const char *const xmbThemeNames[XMB_THEME_COUNT] = {
@@ -73,7 +126,8 @@ static const XMBBgStyle themeStyles[XMB_THEME_COUNT] = {
 	XMB_BG_PS4,
 	XMB_BG_PS4_V2
 };
-uint8_t xmbThemeIndex = 0;
+/* Final startup/menu default chosen with the 1.25-second intro. */
+uint8_t xmbThemeIndex = XMB_THEME_COSMOS_3D_PP;
 
 void xmbBgSetStyle(XMBBgStyle style) { currentStyle = style; }
 XMBBgStyle xmbBgGetStyle(void)       { return currentStyle;  }
@@ -103,6 +157,26 @@ static void gouraudQuad(
 	int x3, int y3, uint32_t c3,   /* bottom-right */
 	bool blend
 ) {
+	bool base = isFullBackdrop(
+		x0, y0, x1, y1, x2, y2, x3, y3, blend);
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE) {
+		if (!base || xmbTransitionBaseDrawn)
+			return;
+		xmbTransitionBaseDrawn = true;
+		c0 = transitionColor(c0); c1 = transitionColor(c1);
+		c2 = transitionColor(c2); c3 = transitionColor(c3);
+	} else if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		if (base && !xmbTransitionBaseDrawn) {
+			xmbTransitionBaseDrawn = true;
+		} else {
+			transitionPoint(&x0, &y0); transitionPoint(&x1, &y1);
+			transitionPoint(&x2, &y2); transitionPoint(&x3, &y3);
+			c0 = transitionColor(c0); c1 = transitionColor(c1);
+			c2 = transitionColor(c2); c3 = transitionColor(c3);
+			if (xmbTransitionLevel < 256)
+				blend = true;
+		}
+	}
 	uint32_t *ptr = allocateGP0Packet(chain, 8);
 	ptr[0] = c0 | gp0_shadedQuad(true, false, blend);
 	ptr[1] = gp0_xy(x0, y0);
@@ -133,6 +207,16 @@ static void gouraudTri(
 	int x2, int y2, uint32_t c2,
 	bool blend
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		transitionPoint(&x0, &y0); transitionPoint(&x1, &y1);
+		transitionPoint(&x2, &y2);
+		c0 = transitionColor(c0); c1 = transitionColor(c1);
+		c2 = transitionColor(c2);
+		if (xmbTransitionLevel < 256)
+			blend = true;
+	}
 	uint32_t *ptr = allocateGP0Packet(chain, 6);
 	ptr[0] = c0 | gp0_shadedTriangle(true, false, blend);
 	ptr[1] = gp0_xy(x0, y0);
@@ -149,6 +233,24 @@ static void flatQuad(
 	int x2, int y2, int x3, int y3,
 	uint32_t color, bool blend
 ) {
+	bool base = isFullBackdrop(
+		x0, y0, x1, y1, x2, y2, x3, y3, blend);
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE) {
+		if (!base || xmbTransitionBaseDrawn)
+			return;
+		xmbTransitionBaseDrawn = true;
+		color = transitionColor(color);
+	} else if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		if (base && !xmbTransitionBaseDrawn) {
+			xmbTransitionBaseDrawn = true;
+		} else {
+			transitionPoint(&x0, &y0); transitionPoint(&x1, &y1);
+			transitionPoint(&x2, &y2); transitionPoint(&x3, &y3);
+			color = transitionColor(color);
+			if (xmbTransitionLevel < 256)
+				blend = true;
+		}
+	}
 	uint32_t *ptr = allocateGP0Packet(chain, 5);
 	ptr[0] = color | gp0_shadedQuad(false, false, blend);
 	ptr[1] = gp0_xy(x0, y0);
@@ -164,6 +266,14 @@ static void shadedLine(
 	int x1, int y1, uint32_t c1,
 	bool blend
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		transitionPoint(&x0, &y0); transitionPoint(&x1, &y1);
+		c0 = transitionColor(c0); c1 = transitionColor(c1);
+		if (xmbTransitionLevel < 256)
+			blend = true;
+	}
 	uint32_t *ptr = allocateGP0Packet(chain, 4);
 	ptr[0] = c0 | gp0_line(true, blend);
 	ptr[1] = gp0_xy(x0, y0);
@@ -175,6 +285,16 @@ static void shadedLine(
 static void point(
 	GPUDMAChain *chain, int x, int y, int size, uint32_t color, bool blend
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		transitionPoint(&x, &y);
+		size = (size * transitionGeometryScale()) >> 8;
+		if (size < 1) size = 1;
+		color = transitionColor(color);
+		if (xmbTransitionLevel < 256)
+			blend = true;
+	}
 	uint32_t *ptr = allocateGP0Packet(chain, 3);
 	ptr[0] = color | gp0_rectangle(false, false, blend);
 	ptr[1] = gp0_xy(x - size / 2, y - size / 2);
@@ -1306,6 +1426,15 @@ static void drawRealCube(
 	GPUDMAChain *chain, int wx, int wy, int wz,
 	int yaw, int pitch, int roll, int half
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		int scale = transitionGeometryScale();
+		wx = wx * scale >> 8;
+		wy = wy * scale >> 8;
+		half = half * scale >> 8;
+		if (half < 1) half = 1;
+	}
 	GTEVector16 v[8];
 	for (int k = 0; k < 8; k++) {
 		v[k].x = (int16_t)(cbVerts[k].x * half);
@@ -1338,6 +1467,8 @@ static void drawRealCube(
 
 		int sh = cbShade[f];
 		uint32_t col = gp0_rgb((sh * 13) >> 4, (sh * 15) >> 4, sh);
+		if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS)
+			col = transitionColor(col);
 
 		uint32_t *ptr = allocateGP0Packet(chain, 5);
 		ptr[0] = col | gp0_shadedQuad(false, false, true);
@@ -1368,6 +1499,15 @@ static void drawGlassCube(
 	GPUDMAChain *chain, int wx, int wy, int wz,
 	int yaw, int pitch, int roll, int half, uint32_t sweep
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		int scale = transitionGeometryScale();
+		wx = wx * scale >> 8;
+		wy = wy * scale >> 8;
+		half = half * scale >> 8;
+		if (half < 1) half = 1;
+	}
 	GTEVector16 v[8];
 	for (int k = 0; k < 8; k++) {
 		v[k].x = (int16_t)(cbVerts[k].x * half);
@@ -1409,6 +1549,8 @@ static void drawGlassCube(
 				(sh * 3) >> 4,     /* very little red   */
 				(sh * 7) >> 4,     /* some green (cyan) */
 				(sh * 12) >> 4);   /* strong blue       */
+			if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS)
+				core = transitionColor(core);
 
 			uint32_t *ptr = allocateGP0Packet(chain, 5);
 			ptr[0] = core | gp0_shadedQuad(false, false, true);
@@ -1435,6 +1577,8 @@ static void drawGlassCube(
 					(b * 11) >> 4,   /* ~0.69 r */
 					(b * 14) >> 4,   /* ~0.88 g */
 					b);              /* full    b */
+				if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS)
+					cc[k] = transitionColor(cc[k]);
 			}
 
 			uint32_t *ptr = allocateGP0Packet(chain, 8);
@@ -2014,6 +2158,16 @@ static void drawTexturedPlanet(
 	GPUDMAChain *chain, int cx, int cy, int radius, uint32_t spin,
 	uint32_t modColor, const TextureInfo *tex, int latDiv, int lonDiv
 ) {
+	if (xmbTransitionMode == XMB_TRANSITION_BASE_FADE)
+		return;
+	bool transitionBlend = false;
+	if (xmbTransitionMode == XMB_TRANSITION_ELEMENTS) {
+		transitionPoint(&cx, &cy);
+		radius = radius * transitionGeometryScale() >> 8;
+		if (radius < 1) radius = 1;
+		modColor = transitionColor(modColor);
+		transitionBlend = xmbTransitionLevel < 256;
+	}
 	// Re-select this texture's page each call, since text/other themes'
 	// primitives change the bound page in between.
 	uint32_t *page = allocateGP0Packet(chain, 1);
@@ -2076,7 +2230,7 @@ static void drawTexturedPlanet(
 			int v0 = tex->v + ringV[i], v1 = tex->v + ringV[i + 1];
 
 			uint32_t *ptr = allocateGP0Packet(chain, 9);
-			ptr[0] = modColor | gp0_shadedQuad(false, true, false);
+			ptr[0] = modColor | gp0_shadedQuad(false, true, transitionBlend);
 			ptr[1] = gp0_xy(x00, y00);
 			ptr[2] = gp0_uv(u0, v0, tex->clut);
 			ptr[3] = gp0_xy(x10, y10);
@@ -3521,7 +3675,8 @@ static PS_LOGO_SIZE_ATTR void drawLogoImpactBarrage(
 
 static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 	RenderContext *ctx, GPUDMAChain *chain,
-	int effect, int cx, int cy, uint32_t frame, uint32_t settledFrame
+	int effect, int cx, int cy, uint32_t frame, uint32_t settledFrame,
+	int backdropLevel
 ) {
 	effect %= PS_LOGO_EFFECT_COUNT;
 	if (effect <= 0)
@@ -3657,7 +3812,14 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 				cx, cy, settledFrame);
 			break;
 		case 28: /* Cosmos + Glass plus four fast behind-logo impacts */
-			cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
+			if (backdropLevel <= 0)
+				break;
+			/* During the menu handoff, the selected theme's exact base is
+			 * already underneath. Keep only the Cosmos foreground elements
+			 * and let the caller dim/shrink those away; an opaque cosmosWash
+			 * here would cover the base and create another hard background cut. */
+			if (backdropLevel >= 256)
+				cosmosWash(chain, ctx->screenWidth, ctx->screenHeight);
 			drawNebulaMorph(chain,
 				ctx->screenWidth / 2, ctx->screenHeight / 2, frame);
 			drawStars(chain,
@@ -3673,50 +3835,11 @@ static PS_LOGO_SIZE_ATTR void drawIntroLogoBackdrop(
 	setBlend(chain, GP0_BLEND_SEMITRANS);
 }
 
-/* Generic 0..256 fade-to-black placed BETWEEN a background and the held PS
- * logo. It works with every current/future menu theme without teaching each
- * theme about intro opacity. Full-screen 50% black passes establish a coarse
- * brightness interval; one ordered 64-band pass fills the fraction between
- * intervals, avoiding the obvious four-step fade a PS1 blend alone gives. */
-static PS_LOGO_SIZE_ATTR void drawIntroBackdropFade(
-	RenderContext *ctx, GPUDMAChain *chain, int darkness
-) {
-	if (darkness <= 0)
-		return;
-	if (darkness >= 256) {
-		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
-			gp0_rgb(0, 0, 0), false);
-		return;
-	}
-
-	setBlend(chain, GP0_BLEND_SEMITRANS);
-	int wanted = 256 - darkness;
-	int hi = 256;
-	while (wanted < (hi >> 1)) {
-		drawRect(ctx, 0, 0, ctx->screenWidth, ctx->screenHeight,
-			gp0_rgb(0, 0, 0), true);
-		hi >>= 1;
-	}
-
-	int lo = hi >> 1;
-	int bands = ((hi - wanted) * 64 + (hi - lo) - 1) / (hi - lo);
-	int bandH = (ctx->screenHeight + 63) / 64;
-	for (int band = 0; band < 64; band++) {
-		/* 37 is coprime to 64, distributing successive bands over the full
-		 * screen instead of revealing them as one descending black block. */
-		if (((band * 37) & 63) >= bands)
-			continue;
-		drawRect(ctx, 0, band * bandH, ctx->screenWidth, bandH,
-			gp0_rgb(0, 0, 0), true);
-	}
-	setBlend(chain, GP0_BLEND_SEMITRANS);
-}
-
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,
 	int effect, int anim, uint32_t fxFrame, uint32_t settledFrame,
-	int backdropDarkness
+	int backdropLevel
 ) {
 	GPUDMAChain *chain = getCurrentChain(ctx);
 
@@ -3729,11 +3852,27 @@ void xmbDrawIntroPSLogo(
 	if (effectIndex < 0)
 		effectIndex += PS_LOGO_EFFECT_COUNT;
 
+	bool fadingCosmos = model == 2 && effectIndex == 28
+		&& backdropLevel < 256;
+	if (fadingCosmos) {
+		if (backdropLevel < 0) backdropLevel = 0;
+		xmbTransitionMode = XMB_TRANSITION_ELEMENTS;
+		xmbTransitionLevel = (backdropLevel * backdropLevel
+			* (768 - 2 * backdropLevel)) >> 16;
+		xmbTransitionW = ctx->screenWidth;
+		xmbTransitionH = ctx->screenHeight;
+		/* No Cosmos wash is drawn in this mode, so every emitted primitive
+		 * is a foreground element and must participate in the fade. */
+		xmbTransitionBaseDrawn = true;
+	}
 	if (model == 2)
 		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy,
-			fxFrame, settledFrame);
-
-	drawIntroBackdropFade(ctx, chain, backdropDarkness);
+			fxFrame, settledFrame, backdropLevel);
+	if (fadingCosmos) {
+		xmbTransitionMode = XMB_TRANSITION_NONE;
+		xmbTransitionLevel = 256;
+		xmbTransitionBaseDrawn = false;
+	}
 
 	/* 29/29 owns one complete Edge Chase after its one-shot barrage. It
 	 * starts 0.3 seconds after the final firework ends and supplies a local
@@ -4254,4 +4393,36 @@ void drawXMBBackground(RenderContext *ctx) {
 		case XMB_BG_GOURAUD_WAVES:
 		default:                     drawGouraudWaves(ctx, chain);   break;
 	}
+}
+
+static int transitionEase(int progress) {
+	if (progress < 0) progress = 0;
+	if (progress > 256) progress = 256;
+	return (progress * progress * (768 - 2 * progress)) >> 16;
+}
+
+static void beginThemeTransition(RenderContext *ctx, int mode, int progress) {
+	xmbTransitionMode = (uint8_t) mode;
+	xmbTransitionLevel = transitionEase(progress);
+	xmbTransitionW = ctx->screenWidth;
+	xmbTransitionH = ctx->screenHeight;
+	xmbTransitionBaseDrawn = false;
+}
+
+static void endThemeTransition(void) {
+	xmbTransitionMode = XMB_TRANSITION_NONE;
+	xmbTransitionLevel = 256;
+	xmbTransitionBaseDrawn = false;
+}
+
+void drawXMBBackgroundBaseFade(RenderContext *ctx, int progress) {
+	beginThemeTransition(ctx, XMB_TRANSITION_BASE_FADE, progress);
+	drawXMBBackground(ctx);
+	endThemeTransition();
+}
+
+void drawXMBBackgroundReveal(RenderContext *ctx, int progress) {
+	beginThemeTransition(ctx, XMB_TRANSITION_ELEMENTS, progress);
+	drawXMBBackground(ctx);
+	endThemeTransition();
 }

@@ -24,6 +24,10 @@ void initXMB(void);
 bool isXMBActive(void);
 void setXMBActive(bool active);
 
+/* Start the final 30-frame boot handoff: the complete XMB UI slides from the
+ * right while the already-running theme background remains stationary. */
+void beginXMBIntroReveal(void);
+
 void renderXMB(RenderContext *ctx, UIState *state);
 void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons);
 

@@ -13,12 +13,13 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "main/renderer.h"
 
 // Category sheet order must match the categories[] array in xmb_menu.c:
 // Settings, Themes, Music, Game, Memory Card Manager, Hardware Tester.
 #define ICON_CAT_COUNT   6
-#define ICON_ITEM_COUNT 11
+#define ICON_ITEM_COUNT 12
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,10 +79,19 @@ typedef enum {
 	PAD_GLYPH_DPAD_UP,
 	PAD_GLYPH_DPAD_DOWN,
 	PAD_GLYPH_DPAD_LEFT,
-	PAD_GLYPH_DPAD_RIGHT
+	PAD_GLYPH_DPAD_RIGHT,
+	/* Standalone 19x19 dashboard navigation D-pad appended after the grid. */
+	PAD_GLYPH_NAVIGATE
 } PadGlyph;
 
 void drawPadGlyph(RenderContext *ctx, int index, int x, int y);
+
+/* Draw a pad glyph at an arbitrary size/tint. Used by the shared font
+ * renderer so inline prompts use this exact same artwork as Pad Tester. */
+void drawPadGlyphSized(
+	RenderContext *ctx, int index, int x, int y, int width, int height,
+	uint32_t color
+);
 
 #ifdef __cplusplus
 }
