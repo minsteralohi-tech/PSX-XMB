@@ -96,7 +96,7 @@ addPS1Executable(
 	src/main/intro.c
 	src/main/intro_ps1.c
 	src/main/app_stub.s
-	src/main/music_settings.c
+	src/main/settings_save.c
 	src/main/unirom_launch.c
 	src/main/handoff.c
 )
@@ -104,6 +104,12 @@ target_compile_options(
 	"${RELEASE_NAME}" PRIVATE
 	-Wall
 	-Wextra
+)
+# The dashboard is intentionally packed against the stock PS1's 2 MB RAM
+# ceiling. Settings save/load is an infrequent UI path, so favour code size
+# over the target-wide -O3 setting for this source without slowing animation.
+set_source_files_properties(
+	src/main/settings_save.c PROPERTIES COMPILE_OPTIONS "-Os"
 )
 target_compile_definitions(
 	"${RELEASE_NAME}" PRIVATE
@@ -125,6 +131,7 @@ addBinaryFile("${RELEASE_NAME}" catPalette "${PROJECT_BINARY_DIR}/assets/catPale
 
 convertImage(assets/icons_item.png 4 assets/itemTexture.dat assets/itemPalette.dat)
 convertImage(assets/padglyphs.png 4 assets/padGlyphTexture.dat assets/padGlyphPalette.dat)
+convertImage(assets/settings_mc_icon.png 4 assets/settingsSaveIconTexture.dat assets/settingsSaveIconPalette.dat)
 
 # PS1 boot sequence artwork. The two PlayStation-screen logos are rasterised
 # from the original SVGs by tools/svg2png.py and are hard edged (2-5 colours),
@@ -149,6 +156,8 @@ addBinaryFile("${RELEASE_NAME}" itemPalette "${PROJECT_BINARY_DIR}/assets/itemPa
 # of a highlight box behind a label.
 addBinaryFile("${RELEASE_NAME}" padGlyphTexture "${PROJECT_BINARY_DIR}/assets/padGlyphTexture.dat")
 addBinaryFile("${RELEASE_NAME}" padGlyphPalette "${PROJECT_BINARY_DIR}/assets/padGlyphPalette.dat")
+addBinaryFile("${RELEASE_NAME}" settingsSaveIconTexture "${PROJECT_BINARY_DIR}/assets/settingsSaveIconTexture.dat")
+addBinaryFile("${RELEASE_NAME}" settingsSaveIconPalette "${PROJECT_BINARY_DIR}/assets/settingsSaveIconPalette.dat")
 
 addBinaryFile("${RELEASE_NAME}" introSonyTexture "${PROJECT_BINARY_DIR}/assets/introSonyTexture.dat")
 addBinaryFile("${RELEASE_NAME}" introSonyPalette "${PROJECT_BINARY_DIR}/assets/introSonyPalette.dat")

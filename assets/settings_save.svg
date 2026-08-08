@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="100%" height="100%">
+  <!-- Deep dark background mimicking the PS1 boot screen -->
+  <rect width="800" height="400" fill="#000000" />
+
+  <defs>
+    <!-- Hard blocky shadow for that retro 3D PS1 feel -->
+    <filter id="retro-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="12" dy="12" stdDeviation="0" flood-color="#333333" flood-opacity="1"/>
+    </filter>
+  </defs>
+
+  <!-- The XMB Text -->
+  <g font-family="'Trebuchet MS', 'Arial Black', sans-serif" font-size="200" font-weight="900" filter="url(#retro-shadow)">
+    <!-- PS Red -->
+    <text x="140" y="260" fill="#E00024">X</text>
+    <!-- PS Yellow -->
+    <text x="310" y="260" fill="#F3C300">M</text>
+    <!-- PS Blue -->
+    <text x="520" y="260" fill="#0072CE">B</text>
+  </g>
+
+  <!-- The PS Green Accent (mimicking the sweeping base of the PS logo) -->
+  <path d="M 130 310 Q 380 370 650 300" fill="transparent" stroke="#00A650" stroke-width="22" stroke-linecap="square" filter="url(#retro-shadow)"/>
+</svg>
