@@ -21,6 +21,7 @@
 #include "main/defs.h"
 #include "main/model_test.h"
 #include "main/renderer.h"
+#include "main/shared_scratch.h"
 #include "ps1/gpucmd.h"
 #include "ps1/registers.h"
 #include "ps1/gte.h"
@@ -81,7 +82,10 @@ typedef struct {
 	uint32_t *nextPacket;
 } ModelChain;
 
-static ModelChain modelChains[2];
+_Static_assert(
+	(sizeof(ModelChain) * 2) <= SHARED_3D_SCRATCH_BYTES,
+	"shared 3D scratch arena is too small for Model Tester"
+);
 
 /* --- helpers ------------------------------------------------------------- */
 
@@ -193,6 +197,7 @@ void runModelTest(RenderContext *ctx, UIState *state, const MenuItem *item) {
 
 	int width  = ctx->screenWidth;
 	int height = ctx->screenHeight;
+	ModelChain *modelChains = (ModelChain *) shared3DScratch;
 
 	ModelTexture texture, font;
 	modelUploadTexture(&texture, modeltexTextureData,

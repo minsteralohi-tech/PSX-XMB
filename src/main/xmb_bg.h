@@ -165,7 +165,7 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
 
 /*
  * The boot intro's PlayStation screen: one of the GTE-transformed PS logo
- * models in ps_logo_bios*.h, converted from the supplied GLBs rather than the
+ * models converted from the supplied GLBs rather than the
  * coarser ps_logo_model.h the TEST logo theme and PS4 v2 draw.
  *
  * cx/cy is where the model's centre lands, camZ is the camera distance
@@ -186,15 +186,11 @@ void xmbDrawIntroRibbons(RenderContext *ctx, uint32_t field);
  * poses live in one block above drawPsScreen(), and the pose tool on the boot
  * menu edits exactly those six numbers live.
  */
-/*
- * Which of the three candidate logo models to draw. All are converted from
- * supplied GLBs and posed to the same on-screen size, so switching between
- * them changes nothing else - the pose tool cycles them live.
- */
-#define XMB_INTRO_LOGO_COUNT 3
+/* All four supplied models share the pose tool and its controls. */
+#define XMB_INTRO_LOGO_COUNT 4
 extern const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT];
 
-/* C exposes its backdrop and material-animation banks in the pose tool. */
+/* The finalized intro logo exposes its effect and animation banks. */
 int xmbIntroPSLogoShadeCount(int model);
 const char *xmbIntroPSLogoShadeName(int model, int shade);
 int xmbIntroPSLogoEffectCount(int model);

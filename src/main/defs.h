@@ -48,6 +48,10 @@
 #define CH_PS1_R1_BUTTON       "\x8b"
 #define CH_PS1_L2_BUTTON       "\x8c"
 #define CH_PS1_R2_BUTTON       "\x8d"
+#define CH_PS1_DPAD_DOWN        "\x8e"
+#define CH_PS1_DPAD_LEFT        "\x8f"
+#define CH_PS1_DPAD_RIGHT       "\x90"
+#define CH_PS1_ANALOG_STICK     "\x91"
 
 /*
  * D-pad Up is available inline. For Right/Down/Left, call

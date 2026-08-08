@@ -166,6 +166,15 @@ static void runSPURAMTest(
 	const MenuItem *item
 ) {
 	testMessage = "Running SPU RAM test... (pass %d)";
+	bool bgmWasEnabled = isBGMEnabled();
+
+	// The standalone upstream tester owns the SPU and has no voices playing.
+	// In the dashboard, the confirmation SFX and looping BGM may still be
+	// reading from SPU RAM when this destructive test starts.  Drain any prior
+	// transfer and force every voice off before overwriting the full testable
+	// range, matching the clean hardware state expected by the upstream code.
+	waitForSPUDMADone();
+	stopAllSPUChannels();
 
 	TestError error;
 
@@ -198,6 +207,8 @@ static void runSPURAMTest(
 	// channel isn't enough, since the actual sample bytes are gone.
 	initSound();
 	playBGM();
+	if (!bgmWasEnabled)
+		toggleBGM();
 
 	enterRAMTesterMenu(ctx, state, item);
 }

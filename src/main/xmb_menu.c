@@ -11,7 +11,6 @@
 #include "main/launch_ui.h"
 #include "main/cd_player.h"
 #include "main/console_info.h"
-#include "main/cpu_bench.h"
 #include "main/fastboot.h"
 #include "main/unirom_launch.h"
 #include "main/defs.h"
@@ -111,7 +110,6 @@ static const XMBEntry hwItems[] = {
 	{ "Test PlayStation Model", 5, runModelTest,   true },
 	{ "Intro Style Test",   5, xmbIntroStyleTest,  true },
 	{ "PS Logo Pose Tool",  5, xmbPSLogoPoseTool,  true },
-	{ "CPU Benchmark",      7, runCPUBenchmark,    true },
 	{ "SPU Channel Test",   8, runSPUChannelTest,  true },
 	{ "Pad Tester",         9, runPadTest,         true },
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },

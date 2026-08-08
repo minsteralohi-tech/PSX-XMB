@@ -51,6 +51,7 @@
 #include "main/sound.h"
 #include "main/trig.h"
 #include "main/xmb_bg.h"
+#include "ps1/registers.h"
 
 extern const uint8_t introSonyTexture[],   introSonyPalette[];
 extern const uint8_t introComputerTexture[], introComputerPalette[];
@@ -676,12 +677,11 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
 #define DEG(d) (((d) * 4096) / 360)
 
 /*
- * Which logo model the sequence uses: 0 = Sketchfab relief, 1 = system BIOS,
- * 2 = newly supplied full-resolution BIOS GLB. The pose tool cycles all three
- * live for hardware comparison; this is just the value it starts from.
+ * Model 0 is the finalized BIOS intro logo. Model 1 is the repaired cyan logo
+ * used by PS4 v2; models 2 and 3 are the two supplied console pose previews.
  */
-#define PS_LOGO_MODEL 2       /* finalized high-resolution C model */
-#define PS_LOGO_TUNE_MODEL 2  /* open the pose/effect tool directly on C */
+#define PS_LOGO_MODEL 0       /* finalized hardware-approved intro model */
+#define PS_LOGO_TUNE_MODEL 1  /* open pose tool on the new Meshy model */
 #define PS_LOGO_SHADE 0   /* finalized hardware-approved ALL MEDIUM bake */
 #define PS_LOGO_EFFECT 28  /* R2 29/29: finalized COSMOS IMPACTS sequence */
 #define PS_LOGO_ANIM   0
@@ -916,7 +916,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 			// Held rather than pressed, so A/B values can be run up quickly.
 			// C uses all four shoulder buttons for model/shadow/effect/animation,
 			// so its pose fields intentionally stay at precise single steps.
-			uint16_t coarse = (model == 2) ? 0 : PAD_BTN_R1;
+			uint16_t coarse = (effectCount > 1) ? 0 : PAD_BTN_R1;
 			int step = poseStep[sel] * ((buttons & coarse) ? 10 : 1);
 
 			if (buttons & PAD_BTN_LEFT)
@@ -1020,7 +1020,7 @@ void runPSLogoPoseTool(RenderContext *ctx) {
 			CH_PS1_SQUARE_BUTTON " preview   "
 			CH_PS1_CIRCLE_BUTTON " back");
 		printString(ctx, 8, 224, 0x707070,
-			(model == 2)
+			(effectCount > 1)
 				? CH_PS1_DPAD " Adjust " CH_PS1_L1_BUTTON " Model "
 					CH_PS1_R2_BUTTON " FX " CH_PS1_L2_BUTTON " Anim"
 				: (shadeCount > 1)
@@ -1119,26 +1119,23 @@ void runPS1IntroStyleTest(RenderContext *ctx) {
 	int savedVariant = introVariant;
 	setPS1IntroVariant(chooseIntroVariant(ctx));
 	initPS1Boot(ctx);
-	runPS1Boot(ctx);
+	(void) runPS1Boot(ctx);
 	reloadTextures(ctx);
 	introVariant = savedVariant;
 }
 
-void runPS1Boot(RenderContext *ctx) {
+bool runPS1Boot(RenderContext *ctx) {
 	/*
-	 * Skip handling is deliberately defensive.
-	 *
-	 * The first version broke out of the loop the moment any button bit was
-	 * set, then span in an unbounded "wait for release" afterwards. A pad
-	 * reporting a stuck bit - or a multitap, or an emulator mapping - would
-	 * therefore skip the whole sequence on frame 0 and then hang forever
-	 * waiting for a release that never comes: a black screen with the music
-	 * still playing, which is exactly what that looks like.
-	 *
-	 * Now a skip has to be a genuine press: the pad must read clear first,
-	 * and every wait is bounded.
+	 * Ordinary input never skips the intro. Start must be held continuously
+	 * for three real seconds (180 NTSC or 150 PAL fields); releasing it resets
+	 * the timer. This keeps accidental taps from cutting off any animation but
+	 * still provides an intentional fast path straight to the dashboard.
 	 */
-	bool sawRelease = false;
+	int skipHoldFrames =
+		((GPU_GP1 & GP1_STAT_FB_MODE_BITMASK) == GP1_STAT_FB_MODE_PAL)
+			? 150 : 180;
+	int startHoldFrames = 0;
+	bool skipped = false;
 
 	// The jingle runs the length of the sequence and borrows the BGM slot,
 	// so the music has to be restored on every exit path below - including
@@ -1158,10 +1155,14 @@ void runPS1Boot(RenderContext *ctx) {
 	for (int frame = 0; frame < sequenceEnd; frame++) {
 		uint16_t buttons = pollController(0) | pollController(1);
 
-		if (!buttons)
-			sawRelease = true;
-		else if (sawRelease)
-			break;
+		if (buttons & PAD_BTN_START) {
+			if (++startHoldFrames >= skipHoldFrames) {
+				skipped = true;
+				break;
+			}
+		} else {
+			startHoldFrames = 0;
+		}
 
 		beginFrame(ctx);
 
@@ -1222,7 +1223,7 @@ void runPS1Boot(RenderContext *ctx) {
 
 	// Do not pass a held button straight to the menu - but never wait
 	// indefinitely for that, for the reason above.
-	for (int guard = 0; guard < 120; guard++) {
+	for (int guard = 0; guard < skipHoldFrames; guard++) {
 		if (!(pollController(0) | pollController(1)))
 			break;
 
@@ -1233,4 +1234,6 @@ void runPS1Boot(RenderContext *ctx) {
 		drawXMBBackground(ctx);
 		endFrame(ctx);
 	}
+
+	return !skipped;
 }

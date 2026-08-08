@@ -133,14 +133,13 @@ void drawPadGlyphSized(
 	int u0 = padGlyphTex.u + cx,        v0 = padGlyphTex.v + cy;
 	/*
 	 * A stretched PS1 textured quad samples up to (but not including) its
-	 * far UV edge.  The tester glyphs were authored around that old -1
-	 * convention, but the supplied 19x19 navigation art uses every source
-	 * pixel.  Give that one cell its true right/bottom boundary so the final
-	 * black outline texel is not discarded.
+	 * far UV edge. Use the true cell boundary for every glyph. The former
+	 * `-1` discarded the final source row/column, which was visible anywhere
+	 * the artwork deliberately touches its cell edge: D-pad Down and the
+	 * stick lost their bottom outline, and the shoulder bevels lost a side.
 	 */
-	int sourceInset = (index == PAD_GLYPH_NAVIGATE) ? 0 : 1;
-	int u1 = u0 + sourceWidth - sourceInset;
-	int v1 = v0 + sourceHeight - sourceInset;
+	int u1 = u0 + sourceWidth;
+	int v1 = v0 + sourceHeight;
 
 	uint32_t *page = allocateGP0Packet(chain, 1);
 	page[0] = gp0_setPage(padGlyphTex.page, false, false);

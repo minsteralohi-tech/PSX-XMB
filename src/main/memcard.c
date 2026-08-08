@@ -1701,7 +1701,7 @@ void runMemoryCardManager(
 
 		printString(ctx, 16, 220, 0x505050,
 			CH_PS1_START_BUTTON ": refresh   "
-			CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON " Return to menu");
+			CH_PS1_SELECT_BUTTON "+" CH_PS1_START_BUTTON " Return to menu");
 
 		endFrame(ctx);
 	}

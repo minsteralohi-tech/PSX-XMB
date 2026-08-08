@@ -81,7 +81,7 @@ static void moveMenuCursor(UIState *state, int step) {
 }
 
 static void drawButtonPrompt(RenderContext *ctx, const char *prompt) {
-	const char *version = "psx-itests-v" VERSION_STRING;
+	const char *version = "ps1-ram-tester v" VERSION_STRING;
 	int        promptY  =
 		ctx->screenHeight - (MARGIN_BOTTOM + FONT_LINE_HEIGHT);
 
@@ -153,6 +153,9 @@ static const char *menuButtonPrompts[] = {
 	[ITEM_ENUM]   = CH_PS1_DPAD " Navigate / Adjust"
 };
 
+static const char ramTesterButtonPrompt[] =
+	CH_PS1_DPAD " Navigate   " CH_PS1_CROSS_BUTTON " Select";
+
 // True for the RAM tester and RAM config screens - the only screens in the
 // app that read/write live hardware timing/addressing registers (DRAM_CTRL,
 // GP1 VRAM size) rather than just app state. Their own progress-bar screen
@@ -167,6 +170,10 @@ static const char *menuButtonPrompts[] = {
 // menus, but not something that should be stacked on top of screens
 // already poking at memory timing/addressing hardware directly.
 static bool isHeavyBackgroundUnsafe(const MenuItem *menu) {
+	return isRAMTesterMenu(menu) || isRAMConfigMenu(menu);
+}
+
+static bool isRAMTesterUI(const MenuItem *menu) {
 	return isRAMTesterMenu(menu) || isRAMConfigMenu(menu);
 }
 
@@ -277,7 +284,12 @@ _nextItem:
 
 	item = &state->currentMenu[state->menuCursor];
 
-	drawButtonPrompt(ctx, menuButtonPrompts[item->type]);
+	drawButtonPrompt(
+		ctx,
+		isRAMTesterUI(state->currentMenu)
+			? ramTesterButtonPrompt
+			: menuButtonPrompts[item->type]
+	);
 }
 
 void updateMenu(RenderContext *ctx, UIState *state, uint16_t buttons) {
@@ -292,7 +304,9 @@ void updateMenu(RenderContext *ctx, UIState *state, uint16_t buttons) {
 
 	switch (item->type) {
 		case ITEM_ACTION:
-			if (pressed & (PAD_BTN_START | PAD_BTN_CIRCLE | PAD_BTN_CROSS)) {
+			if (pressed & (isRAMTesterUI(state->currentMenu)
+				? PAD_BTN_CROSS
+				: (PAD_BTN_START | PAD_BTN_CIRCLE | PAD_BTN_CROSS))) {
 				playConfirmSound();
 				item->action.callback(ctx, state, item);
 			}
@@ -345,18 +359,15 @@ void renderProgressScreen(
 	const char    *message
 ) {
 	// Always the flat backdrop, never the live theme - this screen is used
-	// by the RAM/VRAM/SPU RAM tests, the CPU benchmark, and the reboot
-	// warning. All three actively want this: the RAM tests are exactly
+	// by the RAM/VRAM/SPU RAM tests and the reboot warning. Both actively
+	// want this: the RAM tests are exactly
 	// the "heavy theme selected -> crash" case this whole file's
 	// isHeavyBackgroundUnsafe() exists for (an earlier assumption that
 	// this screen already skipped the theme was wrong - it didn't, it's
 	// called on every single progress update during the actual test, so
 	// the theme was re-rendering the whole time the test ran, not just
-	// while browsing the surrounding menus); the CPU benchmark times
-	// itself against real vblank periods, so a heavy theme competing for
-	// the same frame's GPU/CPU time would actually skew its result, not
-	// just cost performance; and there's no reason to animate a theme
-	// while the console is about to reboot.
+	// while browsing the surrounding menus); and there's no reason to animate
+	// a theme while the console is about to reboot.
 	drawFlatBackdrop(ctx, gp0_rgb(0, 0, 0));
 
 	int textY      = (ctx->screenHeight - PROGRESS_BAR_SPACING) / 2;

@@ -7,13 +7,14 @@
  * it run. Since channels 0-2 are normally used for the scroll/confirm/BGM
  * sounds, testing them interrupts that playback - normal audio is restored
  * on exit the same way the SPU RAM test restores it. Loops back to channel
- * 0 after the last channel and keeps going until any button is pressed.
+ * 0 after the last channel and keeps going until Circle is pressed.
  */
 
 #include <stdint.h>
 #include <stdio.h>
 #include "common/sio0.h"
 #include "common/spu.h"
+#include "main/defs.h"
 #include "main/font.h"
 #include "main/mainmenu.h"
 #include "main/xmb_bg.h"
@@ -50,7 +51,7 @@ void runSPUChannelTest(
 	playTestTone(channel);
 
 	for (;;) {
-		if (pollController(0) | pollController(1))
+		if ((pollController(0) | pollController(1)) & PAD_BTN_CIRCLE)
 			break;
 
 		frameInStep++;
@@ -74,7 +75,8 @@ void runSPUChannelTest(
 		printString(ctx, 16, 60, 0xffffff, line);
 
 		printString(ctx, 16,  90, 0x808080, "Auto-cycling through all channels...");
-		printString(ctx, 16, 102, 0x808080, "Any button: return to menu");
+		printString(ctx, 16, 102, 0x808080,
+			CH_PS1_CIRCLE_BUTTON " Back");
 
 		endFrame(ctx);
 	}

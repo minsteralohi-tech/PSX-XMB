@@ -15,6 +15,7 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
 #include "common/gpu.h"
 #include "common/sio0.h"
 #include "common/spu.h"
@@ -92,6 +93,7 @@ int main(int argc, const char **argv) {
 	/* Apply the first valid dashboard save before the intro hands off to the
 	 * selected live theme.  No save/card is a normal silent first-boot case. */
 	loadSettingsAtBoot();
+	bool introCompleted = true;
 
 #if PS1_BOOT_ENABLED
 	// The PlayStation boot sequence, once per launch. Its textures are
@@ -101,7 +103,7 @@ int main(int argc, const char **argv) {
 	setPS1IntroVariant(chooseIntroVariant(&ctx));
 #endif
 	initPS1Boot(&ctx);
-	runPS1Boot(&ctx);
+	introCompleted = runPS1Boot(&ctx);
 	reloadTextures(&ctx);
 #elif INTRO_ENABLED
 	runBootIntro(&ctx);
@@ -113,7 +115,8 @@ int main(int argc, const char **argv) {
 	/* The intro leaves the selected live theme on screen. Slide the actual
 	 * menu renderer over that same background for the fourth 0.5 s stage, so
 	 * the following normal menu frame is pixel-identical at the handoff. */
-	beginXMBIntroReveal();
+	if (introCompleted)
+		beginXMBIntroReveal();
 #endif
 
 #if GAMEID_ENABLED

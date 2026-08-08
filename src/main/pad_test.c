@@ -184,16 +184,16 @@ static void pollPad(
 /* Button combo readout, e.g. "X+O+R1" */
 
 static const struct { uint16_t mask; const char *name; } BUTTON_NAMES[] = {
-	{ PAD_BTN_UP,       "U"                     },
-	{ PAD_BTN_DOWN,     "D"                     },
-	{ PAD_BTN_LEFT,     "L"                     },
-	{ PAD_BTN_RIGHT,    "R"                     },
+	{ PAD_BTN_UP,       CH_PS1_DPAD_UP            },
+	{ PAD_BTN_DOWN,     CH_PS1_DPAD_DOWN          },
+	{ PAD_BTN_LEFT,     CH_PS1_DPAD_LEFT          },
+	{ PAD_BTN_RIGHT,    CH_PS1_DPAD_RIGHT         },
 	{ PAD_BTN_L1,       CH_PS1_L1_BUTTON         },
 	{ PAD_BTN_L2,       CH_PS1_L2_BUTTON         },
-	{ PAD_BTN_L3,       "L3"                    },
+	{ PAD_BTN_L3,       CH_PS1_ANALOG_STICK      },
 	{ PAD_BTN_R1,       CH_PS1_R1_BUTTON         },
 	{ PAD_BTN_R2,       CH_PS1_R2_BUTTON         },
-	{ PAD_BTN_R3,       "R3"                    },
+	{ PAD_BTN_R3,       CH_PS1_ANALOG_STICK      },
 	{ PAD_BTN_SELECT,   CH_PS1_SELECT_BUTTON     },
 	{ PAD_BTN_START,    CH_PS1_START_BUTTON      },
 	{ PAD_BTN_TRIANGLE, CH_PS1_TRIANGLE_BUTTON   },
@@ -222,8 +222,8 @@ static void buildComboString(uint16_t buttons, char *out, size_t outSize) {
 		first = false;
 	}
 
-	if (first)
-		snprintf(out, outSize, "-");
+	if (first && outSize)
+		out[0] = '\0';
 }
 
 /* Drawing */
@@ -293,7 +293,7 @@ static void drawAnalogStick(
 ) {
 	// 14, not 16: the indicator is now an 18x16 glyph rather than a 6x6
 	// dot, so at full deflection it extends 8px further than the cross arm.
-	// This keeps its lowest edge clear of the "L stick"/"R stick" labels.
+	// This keeps its lowest edge clear of the live pressed-button row.
 	const int radius = 14;
 
 	drawRect(ctx, centerX - radius, centerY - 1, radius * 2, 2, 0x383838, false);
@@ -379,13 +379,11 @@ static void drawPad(RenderContext *ctx, int baseX, int port, const PadState *pad
 	drawAnalogStick(ctx, baseX + 120, 168, pad->rightX, pad->rightY, isAnalog,
 		pad->buttons & PAD_BTN_R3);
 
-	printString(ctx, baseX + 4, 193, 0x505050, "L stick");
-	printString(ctx, baseX + 96, 193, 0x505050, "R stick");
-
-	// Live combo readout, e.g. "X+O+R1"
+	// Live combo readout occupies the old L-stick/R-stick label row. This
+	// leaves a clean gap before the footer even when its entries are glyphs.
 	char combo[48];
 	buildComboString(pad->buttons, combo, sizeof(combo));
-	printString(ctx, baseX + 4, 202, HIGHLIGHT_COLOR, combo);
+	printString(ctx, baseX + 4, 191, HIGHLIGHT_COLOR, combo);
 }
 
 /* Menu callback */
@@ -436,11 +434,11 @@ void runPadTest(
 		beginFrame(ctx);
 		drawXMBBackground(ctx);
 
-		printString(ctx, 16, 208, 0x505050,
+		printString(ctx, 16, 204, 0x505050,
 			CH_PS1_L1_BUTTON "+" CH_PS1_R1_BUTTON ": small motor   "
-			CH_PS1_L2_BUTTON "+" CH_PS1_R2_BUTTON ": big motor (both ports)");
-		printString(ctx, 16, 224, 0x505050,
-			"PORT 1 " CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON
+			CH_PS1_L2_BUTTON "+" CH_PS1_R2_BUTTON ": big motor");
+		printString(ctx, 16, 218, 0x505050,
+			CH_PS1_SELECT_BUTTON "+" CH_PS1_START_BUTTON
 			" Return to menu");
 
 		drawPad(ctx, 0,          0, &pads[0]);

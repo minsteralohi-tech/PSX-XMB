@@ -513,11 +513,11 @@ void runCDPlayer(
 			);
 			printString(ctx, 16, CD_CONTROLS2_Y, 0x505050,
 				CH_PS1_DPAD " Navigate   "
-				CH_PS1_R2_BUTTON "/" CH_PS1_L2_BUTTON " Volume");
+				CH_PS1_L2_BUTTON "/" CH_PS1_R2_BUTTON " Volume");
 		}
 
 		printString(ctx, 16, CD_EXIT_HINT_Y, 0x505050,
-			CH_PS1_START_BUTTON "+" CH_PS1_SELECT_BUTTON " Return to menu");
+			CH_PS1_SELECT_BUTTON "+" CH_PS1_START_BUTTON " Return to menu");
 
 		endFrame(ctx);
 	}

@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "common/reboot.h"
-#include "main/cpu_bench.h"
 #include "main/cd_player.h"
 #include "main/console_info.h"
 #include "main/fastboot.h"
@@ -61,13 +60,6 @@ static const MenuItem mainMenu[] = {
 		.name   = "GPU: Spinning cube (3D/GTE)",
 		.type   = ITEM_ACTION,
 		.action = { .callback = runGPUCubeTest }
-	}, {
-		.name     = "CPU: Benchmark",
-		.type     = ITEM_ACTION,
-		.action   = {
-			.tag      = cpuScoreResult,
-			.callback = runCPUBenchmark
-		}
 	}, {
 		.name   = "SPU: Channel test",
 		.type   = ITEM_ACTION,

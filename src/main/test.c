@@ -26,7 +26,16 @@
 #define VRAM_LINE_SIZE (VRAM_WIDTH * 2)
 
 // TEST_BUFFER_SIZE must be a power of 2 and greater than 2048.
-#define TEST_BUFFER_SIZE 16384
+//
+// Upstream uses 16 KB per buffer (32 KB total) because its standalone
+// executable leaves most of main RAM unused.  The dashboard is much larger:
+// its _bssEnd is currently less than 9 KB below the end of a retail PS1's
+// 2 MB RAM.  Keeping the upstream size therefore makes the second buffer wrap
+// into reserved/kernel memory, which crashes the VRAM test and corrupts SPU
+// readback.  4 KB is the smallest size supported by the same pipelined test
+// logic, so the two buffers fit in the real free region without weakening the
+// patterns or reducing the address range being tested.
+#define TEST_BUFFER_SIZE 4096
 #define TEST_DMA_HEIGHT  (TEST_BUFFER_SIZE / VRAM_LINE_SIZE)
 
 /* Test pattern generator */

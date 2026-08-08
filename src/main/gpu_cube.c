@@ -31,6 +31,7 @@
 #include "common/sio0.h"
 #include "main/gpu_cube.h"
 #include "main/mainmenu.h"
+#include "main/shared_scratch.h"
 #include "main/trig.h"
 #include "ps1/cop0.h"
 #include "ps1/gpucmd.h"
@@ -50,6 +51,11 @@ typedef struct {
 	uint32_t orderingTable[CUBE_ORDERING_TABLE_SIZE];
 	uint32_t *nextPacket;
 } CubeDMAChain;
+
+_Static_assert(
+	(sizeof(CubeDMAChain) * 2) <= SHARED_3D_SCRATCH_BYTES,
+	"shared 3D scratch arena is too small for GPU Cube"
+);
 
 /* Private GPU helpers (ordering-table-aware, not shared with common/gpu.c) */
 
@@ -220,7 +226,7 @@ void runGPUCubeTest(
 	enableOrderingTableDMA();
 	setupGTE(SCREEN_WIDTH, SCREEN_HEIGHT);
 
-	static CubeDMAChain dmaChains[2];
+	CubeDMAChain       *dmaChains = (CubeDMAChain *) shared3DScratch;
 	bool                usingSecondFrame = false;
 	int                 frameCounter     = 0;
 

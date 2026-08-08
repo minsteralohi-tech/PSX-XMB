@@ -41,6 +41,7 @@
 #include "main/intro.h"
 #include "main/renderer.h"
 #include "main/xmb_bg.h"
+#include "ps1/registers.h"
 
 /*
  * The title text.
@@ -91,12 +92,19 @@ void runBootIntro(RenderContext *ctx) {
 	uint8_t savedTheme = xmbThemeIndex;
 
 	xmbThemeIndex = XMB_THEME_GOURAUD_SPARKLE;
+	int skipHoldFrames =
+		((GPU_GP1 & GP1_STAT_FB_MODE_BITMASK) == GP1_STAT_FB_MODE_PAL)
+			? 150 : 180;
+	int startHoldFrames = 0;
 
 	for (int frame = 0; frame < INTRO_FRAMES; frame++) {
-		// Skippable. A boot animation that cannot be skipped stops being
-		// charming the second time you see it.
-		if (pollController(0) | pollController(1))
-			break;
+		uint16_t buttons = pollController(0) | pollController(1);
+		if (buttons & PAD_BTN_START) {
+			if (++startHoldFrames >= skipHoldFrames)
+				break;
+		} else {
+			startHoldFrames = 0;
+		}
 
 		beginFrame(ctx);
 
@@ -179,6 +187,8 @@ void runBootIntro(RenderContext *ctx) {
 
 	// Do not hand a held button straight to the menu - otherwise skipping
 	// the intro also picks whatever the cursor happens to be sitting on.
-	while (pollController(0) | pollController(1))
-		;
+	for (int guard = 0; guard < skipHoldFrames; guard++) {
+		if (!(pollController(0) | pollController(1)))
+			break;
+	}
 }

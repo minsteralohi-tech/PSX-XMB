@@ -177,6 +177,10 @@ static bool getInlinePadGlyph(uint8_t ch, InlinePadGlyph *out) {
 		case 0x8b: out->glyph = PAD_GLYPH_R1;        return true;
 		case 0x8c: out->glyph = PAD_GLYPH_L2;        return true;
 		case 0x8d: out->glyph = PAD_GLYPH_R2;        return true;
+		case 0x8e: out->glyph = PAD_GLYPH_DPAD_DOWN; return true;
+		case 0x8f: out->glyph = PAD_GLYPH_DPAD_LEFT; return true;
+		case 0x90: out->glyph = PAD_GLYPH_DPAD_RIGHT;return true;
+		case 0x91: out->glyph = PAD_GLYPH_STICK;     return true;
 		default:                                      return false;
 	}
 }

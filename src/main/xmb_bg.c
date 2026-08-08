@@ -26,12 +26,14 @@
 #include "common/gpu.h"
 #include "main/font.h"
 #include "main/renderer.h"
+#include "main/shared_scratch.h"
 #include "main/trig.h"
 #include "main/xmb_bg.h"
 #include "main/model/ps_logo_model.h"
-#include "main/model/ps_logo_bios.h"
-#include "main/model/ps_logo_bios2.h"
 #include "main/model/ps_logo_bios3.h"
+#include "main/model/ps_logo_meshy.h"
+#include "main/model/ps_console_classic.h"
+#include "main/model/ps_console_psone.h"
 #include "ps1/cop0.h"
 #include "ps1/gte.h"
 #include "ps1/gpucmd.h"
@@ -2698,10 +2700,11 @@ static void drawNebula3Theme(RenderContext *ctx, GPUDMAChain *chain) {
 
 // Largest face count of any model drawn through drawPSLogoFaces().
 #define PS_LOGO_MAX2(a, b) (((a) > (b)) ? (a) : (b))
-#define PS_LOGO_MAX_FACES              \
-	PS_LOGO_MAX2(PS_LOGO_FACE_COUNT,   \
-	PS_LOGO_MAX2(PS_LOGO_BIOS_FACE_COUNT, \
-	PS_LOGO_MAX2(PS_LOGO_BIOS2_FACE_COUNT, PS_LOGO_BIOS3_FACE_COUNT)))
+#define PS_LOGO_MAX_FACES                                                \
+	PS_LOGO_MAX2(PS_LOGO_FACE_COUNT,                                     \
+	PS_LOGO_MAX2(PS_LOGO_BIOS3_FACE_COUNT,                               \
+	PS_LOGO_MAX2(PS_LOGO_MESHY_FACE_COUNT,                               \
+	PS_LOGO_MAX2(PS_CONSOLE_CLASSIC_FACE_COUNT, PS_CONSOLE_PSONE_FACE_COUNT))))
 
 // Confirmed by eye: 180 degrees. The geometry-based guess (0, i.e. no
 // tilt) was wrong - the model's own bounding box being tall-in-Y suggested
@@ -2722,6 +2725,17 @@ typedef struct {
 	uint8_t  r, g, b, edge;
 	int32_t  z;
 } PSLogoDrawFace;
+
+typedef struct {
+	PSLogoDrawFace drawFaces[PS_LOGO_MAX_FACES];
+	uint16_t       counts[PS_LOGO_OT_SIZE + 1];
+	uint16_t       order[PS_LOGO_MAX_FACES];
+} PSLogoScratch;
+
+_Static_assert(
+	sizeof(PSLogoScratch) <= SHARED_3D_SCRATCH_BYTES,
+	"shared 3D scratch arena is too small for PS-logo sorting"
+);
 
 static int psLogoAbs(int v) {
 	return (v < 0) ? -v : v;
@@ -2989,7 +3003,10 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 	int bright, const uint8_t *shadeColors, const uint8_t *edgeMask,
 	int anim, uint32_t fxFrame, int cx, int cy
 ) {
-	static PSLogoDrawFace drawFaces[PS_LOGO_MAX_FACES];
+	PSLogoScratch *scratch   = (PSLogoScratch *) shared3DScratch;
+	PSLogoDrawFace *drawFaces = scratch->drawFaces;
+	uint16_t       *counts    = scratch->counts;
+	uint16_t       *order     = scratch->order;
 	int ndraw = 0;
 	int zMin = 0x7fffffff, zMax = -0x7fffffff;
 
@@ -3059,9 +3076,6 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 
 	while ((range >> shift) >= PS_LOGO_OT_SIZE)
 		shift++;
-
-	static uint16_t counts[PS_LOGO_OT_SIZE + 1];
-	static uint16_t order[PS_LOGO_MAX_FACES];
 
 	for (int b = 0; b <= PS_LOGO_OT_SIZE; b++)
 		counts[b] = 0;
@@ -3137,7 +3151,7 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 
 /*
  * The boot sequence's PlayStation screen draws the OTHER model - the real one
- * in ps_logo_bios.h, not the coarse ps_logo_model.h the themes use - posed
+ * in ps_logo_bios3.h, not the coarse ps_logo_model.h the themes use - posed
  * rather than free-spinning and positioned to match the BIOS screen.
  *
  * The resting pose is baked into that model's vertices (see its header), so
@@ -3157,19 +3171,20 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
  * roll then tips the whole result in the screen plane.
  */
 /*
- * The three candidate logo models, in menu order.
+ * The four pose-tool models, in menu order.
  *
- * A is the Sketchfab relief - a shallow extrusion of the flat artwork. B is
- * the system-BIOS model, which is genuinely built the way the real screen's
- * logo is: the P standing upright on a swoosh lying flat on the ground plane,
- * rather than everything in one shallow slab. C is the freshly supplied
- * full-resolution BIOS GLB, kept separate so it can be tuned without changing
- * the shipping B model.
+ * A is the finalized, hardware-tuned BIOS logo used by the intro. B is the
+ * repaired solid-cyan Meshy model used by PS4 v2. C and D are the two supplied
+ * console models, retained here so their final placement and animation can be
+ * measured with the same exact controls later.
  */
+#define PS_LOGO_FINALIZED_MODEL 0
+
 const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT] = {
-	"A relief",
-	"B system BIOS",
-	"C new",
+	"A finalized BIOS",
+	"B solid cyan",
+	"C original PS1",
+	"D PS one pixel",
 };
 
 static const struct {
@@ -3183,17 +3198,19 @@ static const struct {
 	int                 shadeCount;
 	const char *const  *shadeNames;
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
-	{ psLogoBiosVertices,  psLogoBiosFaces,  PS_LOGO_BIOS_FACE_COUNT,
-	  1, 1, NULL, NULL, 1, NULL },
-	{ psLogoBios2Vertices, psLogoBios2Faces, PS_LOGO_BIOS2_FACE_COUNT,
-	  1, 1, NULL, NULL, 1, NULL },
 	/*
-	 * C uses weak perspective. Multiplying H and TRZ by the same value keeps
+	 * The finalized model uses weak perspective. Multiplying H and TRZ by the same value keeps
 	 * the centre-plane size for a given CAM Z, while making depth variation
 	 * eight times less able to enlarge the P and shrink the receding S.
 	 */
 	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT,
 	  8, 2, NULL, psLogoBios3EdgeMask, 1, NULL },
+	{ psLogoMeshyVertices, psLogoMeshyFaces, PS_LOGO_MESHY_FACE_COUNT,
+	  8, 2, NULL, NULL, 1, NULL },
+	{ psConsoleClassicVertices, psConsoleClassicFaces, PS_CONSOLE_CLASSIC_FACE_COUNT,
+	  8, 2, NULL, NULL, 1, NULL },
+	{ psConsolePSoneVertices, psConsolePSoneFaces, PS_CONSOLE_PSONE_FACE_COUNT,
+	  8, 2, NULL, NULL, 1, NULL },
 };
 
 int xmbIntroPSLogoShadeCount(int model) {
@@ -3214,7 +3231,7 @@ const char *xmbIntroPSLogoShadeName(int model, int shade) {
 	return introLogos[model].shadeNames[shade];
 }
 
-/* C-only PS1-era backdrop effects selected with R2 in the pose tool. They
+/* Finalized-logo-only PS1-era backdrop effects selected with R2 in the pose tool. They
  * deliberately use untextured additive fans and lines: the same inexpensive
  * vocabulary used for save points, magic, portals and lens flares on the
  * original hardware. */
@@ -3280,11 +3297,11 @@ static const char *const psLogoAnimNames[PS_LOGO_ANIM_COUNT] = {
 };
 
 int xmbIntroPSLogoEffectCount(int model) {
-	return (model == 2) ? PS_LOGO_EFFECT_COUNT : 1;
+	return (model == PS_LOGO_FINALIZED_MODEL) ? PS_LOGO_EFFECT_COUNT : 1;
 }
 
 const char *xmbIntroPSLogoEffectName(int model, int effect) {
-	if (model != 2)
+	if (model != PS_LOGO_FINALIZED_MODEL)
 		return "NONE";
 	effect %= PS_LOGO_EFFECT_COUNT;
 	if (effect < 0)
@@ -3293,11 +3310,11 @@ const char *xmbIntroPSLogoEffectName(int model, int effect) {
 }
 
 int xmbIntroPSLogoAnimCount(int model) {
-	return (model == 2) ? PS_LOGO_ANIM_COUNT : 1;
+	return (model == PS_LOGO_FINALIZED_MODEL) ? PS_LOGO_ANIM_COUNT : 1;
 }
 
 const char *xmbIntroPSLogoAnimName(int model, int anim) {
-	if (model != 2)
+	if (model != PS_LOGO_FINALIZED_MODEL)
 		return "NONE";
 	anim %= PS_LOGO_ANIM_COUNT;
 	if (anim < 0)
@@ -3846,13 +3863,13 @@ void xmbDrawIntroPSLogo(
 	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT)
 		model = 0;
 
-	int logoAnim = (model == 2) ? anim : 0;
+	int logoAnim = (model == PS_LOGO_FINALIZED_MODEL) ? anim : 0;
 	uint32_t logoAnimFrame = fxFrame;
 	int effectIndex = effect % PS_LOGO_EFFECT_COUNT;
 	if (effectIndex < 0)
 		effectIndex += PS_LOGO_EFFECT_COUNT;
 
-	bool fadingCosmos = model == 2 && effectIndex == 28
+	bool fadingCosmos = model == PS_LOGO_FINALIZED_MODEL && effectIndex == 28
 		&& backdropLevel < 256;
 	if (fadingCosmos) {
 		if (backdropLevel < 0) backdropLevel = 0;
@@ -3865,7 +3882,7 @@ void xmbDrawIntroPSLogo(
 		 * is a foreground element and must participate in the fade. */
 		xmbTransitionBaseDrawn = true;
 	}
-	if (model == 2)
+	if (model == PS_LOGO_FINALIZED_MODEL)
 		drawIntroLogoBackdrop(ctx, chain, effect, cx, cy,
 			fxFrame, settledFrame, backdropLevel);
 	if (fadingCosmos) {
@@ -3877,7 +3894,7 @@ void xmbDrawIntroPSLogo(
 	/* 29/29 owns one complete Edge Chase after its one-shot barrage. It
 	 * starts 0.3 seconds after the final firework ends and supplies a local
 	 * 0..89 clock, so case 17 performs exactly one sweep and cannot loop. */
-	if (model == 2 && effectIndex == 28) {
+	if (model == PS_LOGO_FINALIZED_MODEL && effectIndex == 28) {
 		/* This effect owns its material timeline, so a previously selected L2
 		 * animation cannot make the embedded Edge Chase loop before/after it. */
 		logoAnim = 0;
@@ -4134,6 +4151,7 @@ static void drawPS4V2Theme(RenderContext *ctx, GPUDMAChain *chain) {
 	int w = ctx->screenWidth;
 	int h = ctx->screenHeight;
 	uint32_t t = xmbFrame;
+	static uint32_t logoSpinFrame = 0;
 
 	// Very dark navy, close to black - matches the reference video's
 	// background far more than any of the brighter themes above.
@@ -4264,20 +4282,15 @@ static void drawPS4V2Theme(RenderContext *ctx, GPUDMAChain *chain) {
 		drawGlyph(chain, px, py, size, spin, type, col, glow, false);
 	}
 
-	// Fixed rotating PS logo model, bottom-right corner - same size and
-	// spin as the TEST logo theme, just repositioned via GTE_OFX/OFY
-	// instead of driving TRX/TRY (which would also scale its parallax) and
-	// with no drift/roaming motion of its own, unlike the spray glyphs
-	// above - it just sits in place and turns.
-	setupCosmosGTE(w, h);
-	gte_setControlReg(GTE_ZSF3, PS_LOGO_OT_SIZE / 3);
-	gte_setControlReg(GTE_ZSF4, PS_LOGO_OT_SIZE / 4);
-	gte_setControlReg(GTE_TRX, 0);
-	gte_setControlReg(GTE_TRY, 0);
-	gte_setControlReg(GTE_TRZ, 450);
-	gte_setControlReg(GTE_OFX, (w * 78 / 100) << 16);
-	gte_setControlReg(GTE_OFY, (h * 78 / 100) << 16);
-	drawPSLogoModel(chain, t, STAND_UP_ROLL);
+	/* Repaired, single-colour Meshy logo at the exact pose measured in the
+	 * hardware pose tool. One degree per frame traverses -180 through +180
+	 * inclusive, then returns to the equivalent -180 orientation. */
+	int logoYaw = -2048
+		+ (int) ((logoSpinFrame++ % 361u) * (uint32_t) WAVE_FULL / 360u);
+	xmbDrawIntroPSLogo(ctx, 1,
+		261, 173, 1020,
+		logoYaw, 2048, 2048,
+		256, 0, 0, 0, t, 0, 256);
 
 	setBlend(chain, GP0_BLEND_SEMITRANS);
 }

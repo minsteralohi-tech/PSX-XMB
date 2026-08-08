@@ -98,10 +98,10 @@ void runPSLogoPoseTool(RenderContext *ctx);
 void runPS1IntroStyleTest(RenderContext *ctx);
 
 /*
- * Play the sequence: about 16-17 seconds depending on the arrival experiment.
- * Returns when it finishes or the user presses anything.
+ * Play the complete sequence. Ordinary input is ignored; holding Start for
+ * three seconds is the only way to skip directly to the dashboard.
  */
-void runPS1Boot(RenderContext *ctx);
+bool runPS1Boot(RenderContext *ctx);
 
 #ifdef __cplusplus
 }
