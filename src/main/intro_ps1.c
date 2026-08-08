@@ -460,6 +460,11 @@ static bool introUsesWhiteRibbons(void) {
 void initPS1Boot(RenderContext *ctx) {
 	(void) ctx;
 
+	/* Only needed if PS_LOGO_MODEL names one of the two textured consoles, but
+	 * it is two DMA transfers once per boot and doing it unconditionally means
+	 * changing that #define is genuinely a one-line change. */
+	xmbUploadConsoleTextures();
+
 #if PS1_BOOT_TEXTURES
 
 	uploadIndexedTexture(&sonyTex, introSonyTexture, introSonyPalette,
@@ -681,7 +686,10 @@ static void drawSceScreen(RenderContext *ctx, int frame) {
  * used by PS4 v2; models 2 and 3 are the two supplied console pose previews.
  */
 #define PS_LOGO_MODEL 0       /* finalized hardware-approved intro model */
-#define PS_LOGO_TUNE_MODEL 1  /* open pose tool on the new Meshy model */
+/* Which model the pose tool opens on. 2 = C, the textured original PlayStation,
+ * because that is the one currently being placed; L1 still cycles through all
+ * four. Set back to 1 for the Meshy logo. */
+#define PS_LOGO_TUNE_MODEL 2
 #define PS_LOGO_SHADE 0   /* finalized hardware-approved ALL MEDIUM bake */
 #define PS_LOGO_EFFECT 28  /* R2 29/29: finalized COSMOS IMPACTS sequence */
 #define PS_LOGO_ANIM   0
@@ -858,6 +866,11 @@ static const int poseMax[POSE_FIELD_COUNT]  = {  180,  180,  180, 4000, 384,  30
 static const int poseStep[POSE_FIELD_COUNT] = {    1,    1,    1,   10,    1,    1 };
 
 void runPSLogoPoseTool(RenderContext *ctx) {
+	/* Models C and D are textured. This has to happen before the loop below
+	 * starts building frames - it is a VRAM DMA, and the draw path deliberately
+	 * will not do it for us. */
+	xmbUploadConsoleTextures();
+
 	int pose[2][POSE_FIELD_COUNT] = {
 		{ PS_LOGO_START_YAW, PS_LOGO_START_PITCH, PS_LOGO_START_ROLL,
 		  PS_LOGO_START_CAM_Z, PS_LOGO_START_X, PS_LOGO_START_Y },

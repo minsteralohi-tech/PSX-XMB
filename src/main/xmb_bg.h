@@ -198,6 +198,18 @@ const char *xmbIntroPSLogoEffectName(int model, int effect);
 int xmbIntroPSLogoAnimCount(int model);
 const char *xmbIntroPSLogoAnimName(int model, int anim);
 
+/*
+ * Put the two console models' textures (C and D) into VRAM.
+ *
+ * Required before xmbDrawIntroPSLogo() is asked to draw model 2 or 3 - those
+ * two are textured, and without this they sample whatever is in VRAM. Models 0
+ * and 1 are flat-shaded and need nothing.
+ *
+ * Call it from a screen's entry point, NOT from inside a beginFrame()/
+ * endFrame() pair; it performs VRAM DMA. See its definition in xmb_bg.c.
+ */
+void xmbUploadConsoleTextures(void);
+
 void xmbDrawIntroPSLogo(
 	RenderContext *ctx, int model, int cx, int cy, int camZ,
 	int yaw, int pitch, int roll, int bright, int shade,

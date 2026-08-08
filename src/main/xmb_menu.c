@@ -58,7 +58,9 @@ typedef struct {
 /* Forward-declared local actions. */
 static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbLaunchUniROM(RenderContext *ctx, UIState *state, const MenuItem *item);
+#if EMBED_240P_SUITE
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item);
+#endif
 static void xmbLaunchSony41Bios(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbIntroStyleTest(RenderContext *ctx, UIState *state, const MenuItem *item);
 static void xmbPSLogoPoseTool(RenderContext *ctx, UIState *state, const MenuItem *item);
@@ -115,7 +117,17 @@ static const XMBEntry hwItems[] = {
 	{ "PS1 RAM Tester",    10, enterRAMTesterMenu, false },
 	{ "UniROM 8.0",         8, xmbLaunchUniROM,    true },
 	{ "Sony 4.1 BIOS",      8, xmbLaunchSony41Bios, true },
+	/* Listed but not embedded unless EMBED_240P_SUITE is set: a null action
+	 * greys the row out and makes it unselectable rather than letting it
+	 * silently disappear, the same way a dropped BGM track stays in the Music
+	 * picker. This has to be the macro and not is240pSuiteAvailable() - the
+	 * table is static const, so its initialisers must be constant expressions.
+	 * See cmake/options.cmake. */
+#if EMBED_240P_SUITE
 	{ "240p Test Suite",   6, xmbLaunch240pSuite, true },
+#else
+	{ "240p Test Suite",   6, 0,                  true },
+#endif
 };
 
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -209,10 +221,13 @@ static void xmbFastBoot(RenderContext *ctx, UIState *state, const MenuItem *item
 /* UniROM 8.0: chain-load the embedded real UniROM build (see
  * unirom_launch.c). Never returns. */
 /* 240p Test Suite: same shared confirmation screen and hand-off as the two
- * UniROM entries above (see launch_ui.c). Returns if the user backs out. */
+ * UniROM entries above (see launch_ui.c). Returns if the user backs out.
+ * Compiled out along with the blob itself - see cmake/options.cmake. */
+#if EMBED_240P_SUITE
 static void xmbLaunch240pSuite(RenderContext *ctx, UIState *state, const MenuItem *item) {
 	run240pSuite(ctx, state, item);
 }
+#endif
 
 /* Sony 4.1A BIOS shell. Unproven, so this one keeps the hand-off options on
  * screen - see runSony41Bios() in launch_ui.c. */
@@ -627,9 +642,17 @@ void renderXMB(RenderContext *ctx, UIState *state) {
 				drawDisc(getCurrentChain(ctx), ITEM_X - 7, y - 1, TEXT_WHITE);
 		} else {
 			int isz = sel ? 18 : 14;
+			/* A null action means the row is listed but not present in this
+			 * build (the 240p suite when EMBED_240P_SUITE is off). Same
+			 * treatment the Music picker gives a dropped BGM track: still
+			 * visible, visibly unavailable rather than missing or broken. */
+			bool avail = cat->items[j].action != 0;
+
 			drawIcon(ctx, cat->items[j].icon, ITEM_X - isz / 2, y - isz / 2, isz, !sel);
 			printString(ctx, ITEM_X + 14, y - 4,
-				sel ? TEXT_SELECTED : TEXT_DIM, cat->items[j].name);
+				!avail ? TEXT_DISABLED
+				       : (sel ? TEXT_SELECTED : TEXT_DIM),
+				cat->items[j].name);
 		}
 	}
 
@@ -900,6 +923,12 @@ void updateXMB(RenderContext *ctx, UIState *state, uint16_t buttons) {
 			cb(ctx, state, 0);
 			if (isDirect)
 				active = true;
+		} else {
+			// Listed but not present in this build - see the greyed-out row
+			// in the item renderer. The cancel sound is the same "no" the
+			// Music picker gives an unavailable track, so pressing X on it
+			// reads as refused rather than as the dashboard having hung.
+			playCancelSound();
 		}
 	}
 }

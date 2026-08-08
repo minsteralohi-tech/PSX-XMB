@@ -29,8 +29,18 @@
 /* The standalone loader, embedded via addBinaryFile() in CMakeLists.txt. */
 extern const uint8_t sioLoaderExe[];
 extern const uint8_t uniromExe[];
-extern const uint8_t suite240pExe[];
 extern const uint8_t sony41BiosExe[];
+
+/*
+ * The 240p Test Suite is only embedded when EMBED_240P_SUITE is set; without
+ * it there is no suite240pExe symbol to link against. Everything else about
+ * this target - its LaunchConfig, its launch screen, its menu entry - is left
+ * in place, so restoring it is a CMake option and nothing more. See
+ * cmake/options.cmake for why it is off by default.
+ */
+#if EMBED_240P_SUITE
+extern const uint8_t suite240pExe[];
+#endif
 
 /*
  * Per-app launch settings.
@@ -68,7 +78,9 @@ typedef struct {
 
 static const LaunchConfig SIO_LOADER_CONFIG = { 0, 0 };
 static const LaunchConfig UNIROM_CONFIG     = { 0, 0 };
+#if EMBED_240P_SUITE
 static const LaunchConfig SUITE240P_CONFIG  = { 1, 0 };
+#endif
 
 /*
  * Sony 4.1A BIOS shell. Tested on hardware and works with the RAM erase both
@@ -302,6 +314,7 @@ void run240pSuite(
 ) {
 	(void) item;
 
+#if EMBED_240P_SUITE
 	runLaunchScreen(
 		ctx,
 		state,
@@ -309,6 +322,15 @@ void run240pSuite(
 		suite240pExe,
 		&SUITE240P_CONFIG
 	);
+#else
+	/* Not reachable from the XMB - the menu entry carries a null action and is
+	 * drawn greyed out, exactly like a BGM track that is listed but not
+	 * embedded (see bgmTrackAvailable() in sound.c). Kept callable so the
+	 * classic list UI, or anything else that dispatches by name, cannot end up
+	 * calling into a symbol that is not linked in. */
+	(void) ctx;
+	(void) state;
+#endif
 }
 
 void runSony41Bios(

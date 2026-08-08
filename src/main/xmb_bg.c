@@ -33,7 +33,9 @@
 #include "main/model/ps_logo_bios3.h"
 #include "main/model/ps_logo_meshy.h"
 #include "main/model/ps_console_classic.h"
+#include "main/model/ps_console_classic_tex.h"
 #include "main/model/ps_console_psone.h"
+#include "main/model/modeltex.h"
 #include "ps1/cop0.h"
 #include "ps1/gte.h"
 #include "ps1/gpucmd.h"
@@ -2724,6 +2726,11 @@ typedef struct {
 	uint32_t xy0, xy1, xy2;
 	uint8_t  r, g, b, edge;
 	int32_t  z;
+	/* Index of the source face, so a textured model can fetch its three texel
+	 * pairs at emit time. Storing the six UV bytes here instead would widen
+	 * every entry of an array sized for the 560-face logo models, which do not
+	 * have UVs at all - see the note in ps_console_model.h. */
+	uint16_t face;
 } PSLogoDrawFace;
 
 typedef struct {
@@ -3001,7 +3008,8 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 	GPUDMAChain *chain,
 	const PSLogoVertex *verts, const PSLogoFace *faces, int faceCount,
 	int bright, const uint8_t *shadeColors, const uint8_t *edgeMask,
-	int anim, uint32_t fxFrame, int cx, int cy
+	int anim, uint32_t fxFrame, int cx, int cy,
+	const PSConsoleFace *texFaces, const TextureInfo *texture
 ) {
 	PSLogoScratch *scratch   = (PSLogoScratch *) shared3DScratch;
 	PSLogoDrawFace *drawFaces = scratch->drawFaces;
@@ -3010,12 +3018,28 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 	int ndraw = 0;
 	int zMin = 0x7fffffff, zMax = -0x7fffffff;
 
-	for (int i = 0; i < faceCount; i++) {
-		const PSLogoFace *face = &faces[i];
+	/* A textured model supplies texFaces instead of faces; the transform,
+	 * culling and sorting below are identical either way and only the emitted
+	 * primitive differs. */
+	bool textured = (texFaces != NULL) && (texture != NULL);
 
-		gte_loadV0((const GTEVector16 *) &verts[face->v0]);
-		gte_loadV1((const GTEVector16 *) &verts[face->v1]);
-		gte_loadV2((const GTEVector16 *) &verts[face->v2]);
+	for (int i = 0; i < faceCount; i++) {
+		const PSLogoFace *face = textured ? NULL : &faces[i];
+		unsigned int i0, i1, i2;
+
+		if (textured) {
+			i0 = texFaces[i].v0;
+			i1 = texFaces[i].v1;
+			i2 = texFaces[i].v2;
+		} else {
+			i0 = face->v0;
+			i1 = face->v1;
+			i2 = face->v2;
+		}
+
+		gte_loadV0((const GTEVector16 *) &verts[i0]);
+		gte_loadV1((const GTEVector16 *) &verts[i1]);
+		gte_loadV2((const GTEVector16 *) &verts[i2]);
 		gte_command(GTE_CMD_RTPT | GTE_SF);
 
 		gte_command(GTE_CMD_NCLIP);
@@ -3053,11 +3077,23 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 		df->xy0 = xy0;
 		df->xy1 = xy1;
 		df->xy2 = xy2;
-		df->r   = (uint8_t) (((color ? color[0] : face->r) * bright) >> 8);
-		df->g   = (uint8_t) (((color ? color[1] : face->g) * bright) >> 8);
-		df->b   = (uint8_t) (((color ? color[2] : face->b) * bright) >> 8);
+		if (textured) {
+			/* The GPU multiplies each texel by the vertex colour and treats
+			 * 0x80 as unity, so 128 leaves the texture untouched and the same
+			 * 0..256 `bright` the flat models fade with still works - it just
+			 * scales toward black from half, not from full. */
+			uint8_t level = (uint8_t) ((128 * bright) >> 8);
+			df->r = level;
+			df->g = level;
+			df->b = level;
+		} else {
+			df->r = (uint8_t) (((color ? color[0] : face->r) * bright) >> 8);
+			df->g = (uint8_t) (((color ? color[1] : face->g) * bright) >> 8);
+			df->b = (uint8_t) (((color ? color[2] : face->b) * bright) >> 8);
+		}
 		df->edge = edgeMask ? edgeMask[i] : 0;
-		df->z   = z;
+		df->z    = z;
+		df->face = (uint16_t) i;
 	}
 
 	if (!ndraw)
@@ -3091,6 +3127,37 @@ static PS_LOGO_SIZE_ATTR void drawPSLogoFaces(
 
 	for (int k = 0; k < ndraw; k++) {
 		const PSLogoDrawFace *df = &drawFaces[order[k]];
+
+		if (textured) {
+			/*
+			 * Textured triangle, laid out exactly as model_test.c builds one:
+			 * the CLUT rides in the first UV word's high halfword and the
+			 * texture page in the second's, which is the only place the GPU
+			 * reads them from for this primitive.
+			 *
+			 * The u/v stored per face are offsets inside the texture, so the
+			 * TextureInfo's own u/v base is added here - that is what lets the
+			 * same generated tables work wherever the texture happens to have
+			 * been uploaded in VRAM.
+			 */
+			const PSConsoleFace *tf = &texFaces[df->face];
+
+			uint32_t *ptr = allocateGP0Packet(chain, 7);
+			ptr[0] = gp0_rgb(df->r, df->g, df->b)
+				| gp0_shadedTriangle(false, true, false);
+			ptr[1] = df->xy0;
+			ptr[2] = ((uint32_t) texture->clut << 16)
+			       | ((uint32_t) (uint8_t) (texture->v + tf->t0) << 8)
+			       |  (uint32_t) (uint8_t) (texture->u + tf->u0);
+			ptr[3] = df->xy1;
+			ptr[4] = ((uint32_t) texture->page << 16)
+			       | ((uint32_t) (uint8_t) (texture->v + tf->t1) << 8)
+			       |  (uint32_t) (uint8_t) (texture->u + tf->u1);
+			ptr[5] = df->xy2;
+			ptr[6] = ((uint32_t) (uint8_t) (texture->v + tf->t2) << 8)
+			       |  (uint32_t) (uint8_t) (texture->u + tf->u2);
+			continue;
+		}
 
 		uint32_t *ptr = allocateGP0Packet(chain, 4);
 		ptr[0] = gp0_rgb(df->r, df->g, df->b)
@@ -3145,7 +3212,7 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 	cosmosRotate(0, 0, roll);
 
 	drawPSLogoFaces(chain, psLogoVertices, psLogoFaces,
-		PS_LOGO_FACE_COUNT, 256, NULL, NULL, 0, 0, 0, 0);
+		PS_LOGO_FACE_COUNT, 256, NULL, NULL, 0, 0, 0, 0, NULL, NULL);
 	return yaw;
 }
 
@@ -3183,20 +3250,33 @@ static int drawPSLogoModel(GPUDMAChain *chain, uint32_t t, int roll) {
 const char *const xmbIntroLogoNames[XMB_INTRO_LOGO_COUNT] = {
 	"A finalized BIOS",
 	"B solid cyan",
-	"C original PS1",
-	"D PS one pixel",
+	"C PS1 textured",
+	"D PS one textured",
 };
 
+/*
+ * C and D are textured; A and B are flat-shaded. A textured entry leaves
+ * `faces` null and supplies `texFaces` plus which uploaded texture to sample -
+ * see drawPSLogoFaces(), where that is the only difference between them.
+ */
+typedef enum {
+	CONSOLE_TEX_NONE = 0,
+	CONSOLE_TEX_CLASSIC,
+	CONSOLE_TEX_PSONE,
+} ConsoleTexSlot;
+
 static const struct {
-	const PSLogoVertex *verts;
-	const PSLogoFace   *faces;
-	int                 faceCount;
-	int                 projectionScale;
-	int                 coordinateScale;
-	const uint8_t      *shadeColors;
-	const uint8_t      *edgeMask;
-	int                 shadeCount;
-	const char *const  *shadeNames;
+	const PSLogoVertex  *verts;
+	const PSLogoFace    *faces;
+	int                  faceCount;
+	int                  projectionScale;
+	int                  coordinateScale;
+	const uint8_t       *shadeColors;
+	const uint8_t       *edgeMask;
+	int                  shadeCount;
+	const char *const   *shadeNames;
+	const PSConsoleFace *texFaces;
+	ConsoleTexSlot       texSlot;
 } introLogos[XMB_INTRO_LOGO_COUNT] = {
 	/*
 	 * The finalized model uses weak perspective. Multiplying H and TRZ by the same value keeps
@@ -3204,14 +3284,88 @@ static const struct {
 	 * eight times less able to enlarge the P and shrink the receding S.
 	 */
 	{ psLogoBios3Vertices, psLogoBios3Faces, PS_LOGO_BIOS3_FACE_COUNT,
-	  8, 2, NULL, psLogoBios3EdgeMask, 1, NULL },
+	  8, 2, NULL, psLogoBios3EdgeMask, 1, NULL, NULL, CONSOLE_TEX_NONE },
 	{ psLogoMeshyVertices, psLogoMeshyFaces, PS_LOGO_MESHY_FACE_COUNT,
-	  8, 2, NULL, NULL, 1, NULL },
-	{ psConsoleClassicVertices, psConsoleClassicFaces, PS_CONSOLE_CLASSIC_FACE_COUNT,
-	  8, 2, NULL, NULL, 1, NULL },
-	{ psConsolePSoneVertices, psConsolePSoneFaces, PS_CONSOLE_PSONE_FACE_COUNT,
-	  8, 2, NULL, NULL, 1, NULL },
+	  8, 2, NULL, NULL, 1, NULL, NULL, CONSOLE_TEX_NONE },
+	/* C and D: coordinateScale 1, not 2. tools/glb2console.py normalises both
+	 * consoles to a 1320-unit longest axis directly, where the flat logo models
+	 * above are stored at 2x precision and scaled back here. Leaving these at 2
+	 * would put them at twice the intended distance for a given CAM Z. */
+	{ psConsoleClassicVertices, NULL, PS_CONSOLE_CLASSIC_FACE_COUNT,
+	  8, 1, NULL, NULL, 1, NULL,
+	  psConsoleClassicFaces, CONSOLE_TEX_CLASSIC },
+	{ psConsolePSoneVertices, NULL, PS_CONSOLE_PSONE_FACE_COUNT,
+	  8, 1, NULL, NULL, 1, NULL,
+	  psConsolePSoneFaces, CONSOLE_TEX_PSONE },
 };
+
+/*
+ * VRAM for the two console textures.
+ *
+ * Everything else in this project lives above y=256 in the right-hand columns
+ * or in the framebuffers; see icon.c's map. The block from x=384 to x=640 below
+ * y=256 is genuinely unused - the two 320x240 framebuffers only reach y=240 and
+ * x=640, and the planet CLUTs sit at x 0..256 on rows 241-244 - so both
+ * textures fit without disturbing a single existing slot, and neither screen
+ * has to restore anything afterwards.
+ *
+ * Both land in texture pages whose Y base is 1 (y = 256). The classic is 8bpp,
+ * so its 256 texels span 128 VRAM columns (512..640); the PS one is 16bpp, so
+ * its 128 texels span 128 columns (384..512). They do not overlap.
+ */
+#define CONSOLE_CLASSIC_VRAM_X 512
+#define CONSOLE_CLASSIC_VRAM_Y 256
+#define CONSOLE_CLASSIC_CLUT_X 256   /* clear of the planet CLUTs at x 0..256 */
+#define CONSOLE_CLASSIC_CLUT_Y 250
+
+#define CONSOLE_PSONE_VRAM_X   384
+#define CONSOLE_PSONE_VRAM_Y   256
+
+static TextureInfo consoleClassicTex;
+static TextureInfo consolePSoneTex;
+
+/*
+ * Upload both console textures. Call before drawing model C or D.
+ *
+ * MUST NOT be called between beginFrame() and endFrame(). sendVRAMData() takes
+ * the GPU's DMA request mode away and starts a transfer of its own, and the
+ * previous frame's linked list may still be running at that point - endFrame()
+ * kicks it off and returns without waiting. Every caller here is therefore an
+ * entry point (the pose tool before its loop, initPS1Boot() before the boot
+ * sequence starts), never the draw path.
+ *
+ * Deliberately re-uploads every time rather than caching behind a "done" flag.
+ * The RAM tester overwrites the whole of VRAM and relies on reloadTextures()
+ * to put things back (see renderer.c); a flag would survive that and leave
+ * these two sampling whatever the test pattern left behind. Two DMA transfers
+ * on entry to a screen is not worth being clever about.
+ */
+void xmbUploadConsoleTextures(void) {
+	uploadIndexedTexture(
+		&consoleClassicTex,
+		psConsoleClassicTextureData,
+		psConsoleClassicClutData,
+		CONSOLE_CLASSIC_VRAM_X, CONSOLE_CLASSIC_VRAM_Y,
+		CONSOLE_CLASSIC_CLUT_X, CONSOLE_CLASSIC_CLUT_Y,
+		PS_CONSOLE_CLASSIC_TEX_WIDTH, PS_CONSOLE_CLASSIC_TEX_HEIGHT,
+		GP0_COLOR_8BPP
+	);
+
+	uploadTexture(
+		&consolePSoneTex,
+		modeltexTextureData,
+		CONSOLE_PSONE_VRAM_X, CONSOLE_PSONE_VRAM_Y,
+		MODELTEX_WIDTH, MODELTEX_HEIGHT
+	);
+}
+
+static const TextureInfo *consoleTexture(ConsoleTexSlot slot) {
+	switch (slot) {
+		case CONSOLE_TEX_CLASSIC: return &consoleClassicTex;
+		case CONSOLE_TEX_PSONE:   return &consolePSoneTex;
+		default:                  return NULL;
+	}
+}
 
 int xmbIntroPSLogoShadeCount(int model) {
 	if (model < 0 || model >= XMB_INTRO_LOGO_COUNT)
@@ -3959,10 +4113,18 @@ void xmbDrawIntroPSLogo(
 			+ shade * introLogos[model].faceCount * 3;
 	}
 
+	/* Whatever xmbUploadConsoleTextures() last put in VRAM. Uploading here
+	 * instead would be a VRAM DMA in the middle of building a display list -
+	 * see that function's comment. */
+	const TextureInfo *texture = introLogos[model].texFaces
+		? consoleTexture(introLogos[model].texSlot)
+		: NULL;
+
 	drawPSLogoFaces(chain, introLogos[model].verts, introLogos[model].faces,
 		introLogos[model].faceCount, bright, shadeColors,
 		introLogos[model].edgeMask,
-		logoAnim, logoAnimFrame, cx, cy);
+		logoAnim, logoAnimFrame, cx, cy,
+		introLogos[model].texFaces, texture);
 }
 
 /* --- style: PS4 (flowing silk ribbons on deep blue) ---------------------

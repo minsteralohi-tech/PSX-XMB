@@ -36,7 +36,15 @@ void runSony41Bios(
 	const MenuItem *item
 );
 
-/* Tools -> 240p Test Suite. */
+/*
+ * Tools -> 240p Test Suite.
+ *
+ * Only does anything when EMBED_240P_SUITE is set; that option is off by
+ * default and assets/240p.exe is then not in the build at all. The menu entry
+ * is still listed, greyed out and unselectable via a null action - the same
+ * treatment sound.c gives a BGM track dropped to free RAM. See
+ * cmake/options.cmake.
+ */
 void run240pSuite(
 	RenderContext  *ctx,
 	UIState        *state,
