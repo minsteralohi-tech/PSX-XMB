@@ -99,12 +99,26 @@ addPS1Executable(
 	src/main/shared_scratch.c
 	src/main/unirom_launch.c
 	src/main/handoff.c
+	# Model data that more than one screen draws, so it cannot sit in a header
+	# as a static array without being duplicated per translation unit. Both are
+	# generated - see tools/glb2console.py.
+	src/main/model/modeltex.c
+	src/main/model/ps_console_classic_tex.c
 )
 target_compile_options(
 	"${RELEASE_NAME}" PRIVATE
 	-Wall
 	-Wextra
 )
+# Embedding the 240p suite puts this executable back over UniROM's resident
+# copy, so it also waives cmake/executable.ld's serial-loading check. Such a
+# build is CD/ODE only - see that check and cmake/options.cmake.
+if(EMBED_240P_SUITE)
+	target_link_options(
+		"${RELEASE_NAME}" PRIVATE
+		"-Wl,--defsym=__allowUniROMOverlap=1"
+	)
+endif()
 # The dashboard is intentionally packed against the stock PS1's 2 MB RAM
 # ceiling. These are infrequent, non-animation UI paths, so favour code size
 # over the target-wide -O3 setting without slowing the intro, live themes or
@@ -119,6 +133,7 @@ set_source_files_properties(
 target_compile_definitions(
 	"${RELEASE_NAME}" PRIVATE
 	$<$<BOOL:${ENABLE_LOGGING}>:ENABLE_LOGGING=1>
+	$<$<BOOL:${EMBED_240P_SUITE}>:EMBED_240P_SUITE=1>
 	VERSION="${PROJECT_VERSION}"
 )
 
@@ -256,7 +271,16 @@ addBinaryFile("${RELEASE_NAME}" sioLoaderExe assets/sioloader.exe)
 # assets/sanctuary.vag was dropped from the BGM list and the three roaming
 # planet textures went from 8bpp to 4bpp. It loads at 0x80010000 - on top of
 # this dashboard - so it is always launched through the stage 1 trampoline.
-addBinaryFile("${RELEASE_NAME}" suite240pExe assets/240p.exe)
+#
+# NOT embedded by default any more. This dashboard is also loaded over serial
+# under UniROM, and UniROM's resident copy sits at 0x801D0000: with the suite
+# embedded, the last 161 KB of this executable landed straight on top of
+# UniROM's own SIO receive loop, so NoPS was overwriting the code that was
+# receiving the file. Turn EMBED_240P_SUITE back ON for a CD/ODE build that
+# never has to coexist with UniROM - see cmake/options.cmake.
+if(EMBED_240P_SUITE)
+	addBinaryFile("${RELEASE_NAME}" suite240pExe assets/240p.exe)
+endif()
 
 # Sony 4.1A BIOS shell (ISO9660). Loads at 0x8002F000 - straight over this
 # dashboard - so it always takes the stage 1 trampoline. Unproven on hardware,

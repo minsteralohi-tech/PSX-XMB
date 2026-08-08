@@ -138,6 +138,45 @@ SECTIONS {
 	 */
 	_imageEnd = .;
 
+	/*
+	 * DO NOT RAISE THIS TO GET A BUILD THROUGH.
+	 *
+	 * This dashboard is loaded two ways: from a CD, where it owns all of RAM,
+	 * and over serial with UniROM/NoPS, where it does not. UniROM 8.0.K is
+	 * itself a PS-EXE that loads at 0x801D0000 and stays resident for the whole
+	 * transfer - its SIO1 receive loop is at 0x801D70F0 and its blocking byte
+	 * read at 0x801D9B98 (see the README's reverse-engineering notes). Anything
+	 * this executable occupies at or above 0x801D0000 is therefore written over
+	 * UniROM's own running code BY UniROM, while it is still receiving.
+	 *
+	 * That is not a crash at startup, which is what makes it confusing: the
+	 * transfer fails partway through, or completes and dies immediately after
+	 * launching, depending on exactly which of UniROM's routines got clobbered
+	 * first.
+	 *
+	 * .bss counts. It is not in the file NoPS sends, but crt0.s zeroes it and
+	 * the stack lives inside it (_stackBuffer, in .sbss), so an image that only
+	 * *loads* below 0x801D0000 would still scribble over UniROM as soon as it
+	 * started running.
+	 *
+	 * If this fires, free RAM - do not move the line. EMBED_240P_SUITE in
+	 * cmake/options.cmake is the intended lever and is worth 395 KB on its own.
+	 *
+	 * Turning that option ON is also how you opt OUT of this check: CMake then
+	 * passes --defsym=__allowUniROMOverlap=1, which relaxes the ceiling to the
+	 * top of stock RAM. That build is for a CD or ODE, where nothing else is
+	 * resident and the whole 2 MB is genuinely ours; it simply cannot be sent
+	 * over serial, which is the trade the option describes.
+	 */
+	UNIROM_LOAD_ADDR = DEFINED(__allowUniROMOverlap) ? 0x80200000 : 0x801d0000;
+
+	/* One line: ld does not treat a backslash-newline inside a quoted string
+	 * as a continuation, it keeps both characters and prints them. */
+	ASSERT(
+		_imageEnd <= UNIROM_LOAD_ADDR,
+		"executable overlaps UniROM's resident copy at 0x801d0000 and cannot be loaded over serial - free RAM (see EMBED_240P_SUITE in cmake/options.cmake)"
+	)
+
 	/DISCARD/ : {
 		*(.note.* .gnu_debuglink .gnu.lto_*)
 		*(.MIPS.abiflags)

@@ -1,4 +1,26 @@
-"""Convert the two supplied low-poly PlayStation consoles for the pose tool.
+"""SUPERSEDED - do not run. Use tools/glb2console.py instead.
+
+This wrote the same two headers (src/main/model/ps_console_classic.h and
+ps_console_psone.h) that glb2console.py now owns, so running it would overwrite
+the textured models with flat-coloured ones again.
+
+Why it was replaced: it sampled each triangle's texture ONCE and stored the
+result as a single flat face colour. On a console whose entire visual interest
+is its texture, that collapsed the classic PlayStation to 6 unique colours over
+296 faces (191 of them the same grey) and the PS one to 5 over 80 - two
+featureless white blocks. glb2console.py keeps the per-vertex UVs and emits the
+texture with the geometry.
+
+It also did not flip Z when converting out of glTF space, which showed the
+models mirrored - invisible while they had no texture to read, obvious now.
+
+Kept for reference only: its normal-recalculation step (PSX.glb has 96
+inconsistently-wound edges) is reimplemented in pure Python in glb2console.py's
+reorient(), and this is the original that behaviour was checked against.
+
+Original docstring follows.
+
+Convert the two supplied low-poly PlayStation consoles for the pose tool.
 
 Run with Blender in background mode:
 
@@ -9,6 +31,14 @@ their geometry is preserved in full.  Their embedded texture is sampled once
 per triangle into flat PS1 colours; this keeps the pose preview tiny and avoids
 adding UV/texture state to the existing untextured GTE renderer.
 """
+
+import sys as _sys
+
+_sys.exit(
+    "tools/blender_prepare_pose_consoles.py is superseded by "
+    "tools/glb2console.py, which produces textured models. Running this would "
+    "overwrite them with flat-coloured ones. See the docstring above."
+)
 
 import pathlib
 

@@ -49,3 +49,34 @@ set(
 	ENABLE_LOGGING OFF
 	CACHE BOOL "Enable debug logging to serial port (SIO1)"
 )
+
+# Artemio Urbina's 240p Test Suite (assets/240p.exe), embedded and launched
+# from Hardware Tests. OFF by default because at 395,264 bytes it is what
+# pushed this dashboard's total RAM footprint over the ceiling imposed by
+# loading it over serial under UniROM - see the UNIROM_CEILING check in
+# cmake/executable.ld for the exact numbers and why they are what they are.
+#
+# Nothing else was removed to make room: this one file is the whole of the
+# 161 KB that had to go. assets/240p.exe stays in the repository, the launch
+# code stays in src/main/launch_ui.c, and the menu entry stays visible (greyed
+# out) in Hardware Tests:
+#
+#     cmake -B build -DEMBED_240P_SUITE=ON
+#
+# Turning it ON also waives the serial-loading check in cmake/executable.ld,
+# because such a build is for a CD or ODE where the whole 2 MB is genuinely
+# ours.
+#
+# BE AWARE, AS OF THE TEXTURED CONSOLE MODELS: ON does not currently link. The
+# pose tool's original-PlayStation model carries a 256x256 8bpp texture (64 KB
+# of the 65 KB those two models added), and with the 240p suite back in, the
+# build overflows stock 2 MB RAM by 34,840 bytes - a real hardware limit, not
+# the UniROM check. Re-enabling it therefore needs roughly 35 KB freed as well.
+# The cheapest 35 KB is that texture: dropping it to 128x128 in
+# tools/glb2console.py's MODELS saves 49 KB and costs the SONY/PlayStation
+# lettering its crispness.
+set(
+	EMBED_240P_SUITE OFF
+	CACHE BOOL "Embed the 240p Test Suite (needs 395 KB; breaks serial loading \
+under UniROM - see cmake/executable.ld)"
+)
